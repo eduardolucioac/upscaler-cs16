@@ -99,27 +99,4 @@ WINE_DRIVE_C_S="/home/eduardolac/.PlayOnLinux/wineprefix/cs16_txt_gen/drive_c"
 # NOTE: Keep the last X logs. By Questor
 LOGS_KEEP_S=5
 
-
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# Backup files "bug"(?)!
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-
-
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-# O "sonho" aconteceu! Finalmente uma solução simples, completa e automatizada para aumentar a resolução (texture upscaler) dos antigos mapas do CS 1.6! Wow!
-# Tenha em mente que o USCS16 - UpScaler CS 1.6 não fará milagre, pois é uma solução geral para centenas de problemas específicos.
-# Alguns mapas vão melhorar drasticamente, outros nem tanto; alguns apresentaram "bugs" nas texturas. Mas, DE MANEIRA GERAL O USCS16 - UPSCALER CS 1.6 APRESENTARÁ RESULTADOS EXCELENTES!
-# NOTE: A quase todos os "bugs" nas texturas podem ser resolvidos com alguns ajustes manuais.
-# TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-
-# TODO: Todos os maps devem estar perfeitamente funcionais!
-# TODO: Garanta que a os seus recursos de hardware estejam o mais desocupados possivel. Em alguns casos, reiniciar seu SO ajudará significamente a melhorar a performance do script.
-# TODO: You will need a metahook for the scheme to work. Metahook Plus 0.4, Renderer 1.5c and Bash >= 4.3...
-# TODO: Recalcular o uso de disco.
-# TODO: "skynames" will be on the "WORK_FOLDER_ENV_S" folder and "textures" on the "WORK_FOLDER_DETAIL_S".
-
 # < -----------------------------------------

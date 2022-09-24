@@ -190,7 +190,7 @@ f_start "$TITLE_F" "$VERSION_F" "$ABOUT_F$TUX" "$WARNINGS_F" "$COMPANY_F"
 # Terms and license.
 # --------------------------------------
 
-TERMS_LICEN_F=$(cat $SCRIPT_DIR_S/LICENSE.txt)
+TERMS_LICEN_F=$(cat $SCRIPT_DIR_S/complete_license.txt)
 f_terms_licen "$TERMS_LICEN_F"
 
 f_manage_logs " > Terms and license accepted." "o" 1
