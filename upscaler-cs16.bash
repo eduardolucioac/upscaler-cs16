@@ -198,11 +198,11 @@ f_manage_logs " > Terms and license accepted." "o" 1
 # < --------------------------------------------------------------------------
 
 # > --------------------------------------------------------------------------
-# Allows you to resume a process in case of failure or need.
+# Manage arrays and files generated with the contents of these arrays.
 # --------------------------------------
 
 # > -----------------------------------------
-# Allows you to resume a process in case of failure or need.
+# Manage arrays and files generated with the contents of these arrays.
 
 # [Ref(s).: https://unix.stackexchange.com/a/46326/61742 ,
 # https://askubuntu.com/a/318211/134723 ,
@@ -213,62 +213,77 @@ f_manage_logs " > Terms and license accepted." "o" 1
 # https://stackoverflow.com/a/638980/3223785 ,
 # https://stackoverflow.com/a/20243503/3223785 ,
 # https://stackoverflow.com/a/11395181/3223785 ]
-F_RESUME_PROCESS_R=0
-function f_resume_process(){
-    : 'Allows you to resume a process in case of failure or need.
-
-    The basic logic consists of using arrays and files generated with the contents
-    of these arrays to resume loops that consume these arrays and have a long duration.
+F_MANAGE_ARRAYS_N_FILES_R=0
+function f_manage_arrays_n_files(){
+    : 'Manage arrays and files generated with the contents of these arrays.
 
     Args:
-        F_RP_OPTION (str): "ck" - Checks if there is a file with the array contents;
-    "ct" - Creates a file from the the array contents; "rd" - Reads the file contents
-    to an array; rm - Removes the file with the array'\''s contents;
+        F_RP_OPTION (str): "ck" - Checks if there is a file with the array contents.
+    "ct" - Creates a file from the the array contents. "rd" - Reads the file contents
+    to an array. rm - Removes the file with the array'\''s contents.
         F_RP_TARGET (str)(by reference): It'\''s basically the name of the array
-    and the file you want to create or read.
+    and the file (if F_FILE_PATH is <EMPTY/NOT INFORMED>) you want to create or
+    read. It will be OPTIONAL IF F_FILE_PATH is <NOT EMPTY> and F_RP_OPTION equals
+    "ck".
+        F_FILE_PATH (Optional[str]): <EMPTY/NOT INFORMED> - For actions that involve
+    resuming a previous process (Failsafe). Array files in the "__FAILSAFE__" folder.
+    <NOT EMPTY> - For other situations. Array files in the informed path. Default
+    <EMPTY/NOT INFORMED>.
 
     Returns:
-        F_RESUME_PROCESS_R (int)(if F_RP_OPTION equals "ck"): 0 - If the file with
-    the array contents does NOT EXIST; 1 - Otherwise.
+        F_MANAGE_ARRAYS_N_FILES_R (int)(if F_RP_OPTION equals "ck"): 0 - If the file
+    with the array contents does NOT EXIST. 1 - Otherwise.
     '
 
-    F_RESUME_PROCESS_R=0
+    F_MANAGE_ARRAYS_N_FILES_R=0
     local F_RP_OPTION=$1
     local F_RP_TARGET=$2
-    if [ -n "$F_RP_TARGET" ] ; then
+    if [ "$F_RP_OPTION" != "ck" ] && [ -n "$F_RP_TARGET" ] ; then
         declare -n F_RP_TARGET_ARR=$F_RP_TARGET
     fi
-    local F_FAILSAFE_PATH="$SCRIPT_DIR_S/__FAILSAFE__"
-    local F_RP_TARGET_PATH="$F_FAILSAFE_PATH/$F_RP_TARGET"
+    local F_FILE_PATH=$3
+    local FOLDER_PATH=""
+    local FILE_PATH=""
+    if [ -n "$F_FILE_PATH" ] ; then
+        FILE_PATH="$F_FILE_PATH"
+    else
+        FOLDER_PATH="$SCRIPT_DIR_S/__FAILSAFE__"
+        FILE_PATH="$FOLDER_PATH/$F_RP_TARGET"
+    fi
     case "$F_RP_OPTION" in
         "ck") # ChecK
-            f_chk_fd_fl "$F_RP_TARGET_PATH" "f"
-            F_RESUME_PROCESS_R=$CHK_FD_FL_R
+            f_chk_fd_fl "$FILE_PATH" "f"
+            F_MANAGE_ARRAYS_N_FILES_R=$CHK_FD_FL_R
         ;;
         "ct") # CreaTe
+            if [ -z "$F_FILE_PATH" ] ; then
 
-            # NOTE: Create the folder "./__FAILSAFE__" if it does not exist. By Questor
-            f_chk_fd_fl "$F_FAILSAFE_PATH" "d"
+                # NOTE: Create the folder "./__FAILSAFE__" if it does not exist.
+                # By Questor
+                f_chk_fd_fl "$FOLDER_PATH" "d"
             if [ ${CHK_FD_FL_R} -eq 0 ] ; then
-                mkdir "$F_FAILSAFE_PATH"
+                    mkdir "$FOLDER_PATH"
             fi
 
-            f_arrays_n_files "c" "$F_RP_TARGET_PATH" F_RP_TARGET_ARR[@]
+            fi
+            f_arrays_n_files "c" "$FILE_PATH" F_RP_TARGET_ARR[@]
         ;;
         "rd") # ReaD
-            f_arrays_n_files "r" "$F_RP_TARGET_PATH"
+            f_arrays_n_files "r" "$FILE_PATH"
             F_RP_TARGET_ARR=("${F_ARRAYS_N_FILES_R[@]}")
         ;;
         "rm") # ReMove
-            rm -f "$F_RP_TARGET_PATH"
+            rm -f "$FILE_PATH"
+            if [ -z "$F_FILE_PATH" ] ; then
 
             # NOTE: Remove the "./__FAILSAFE__" directory if it is empty. Hidden
             # files and folders will not be considered. By Questor
-            f_del_empty_fl "$F_FAILSAFE_PATH" 1
+                f_del_empty_fl "$FOLDER_PATH" 1
 
+            fi
         ;;
         *)
-            local ERROR_NOW="Invalid option! (f_resume_process)"
+            local ERROR_NOW="Invalid option! (f_manage_arrays_n_files)"
             f_manage_logs "$ERROR_NOW" "e"
             f_error_exit "$ERROR_NOW"
         ;;
@@ -482,8 +497,15 @@ function f_define_skyname(){
 TGA: $WORK_FOLDER_ENV_S/${SKY_NAME}${SKY_SIDES[$j]}.tga (use case-insensitive path)
 BSP: $BSP_FILE" "e"
             elif [ ${j} -eq 0 ] ; then
-                f_upscl_fact_calc "$SKY_ITEM"
-                F_SKYNAME_N_UPSCL_FACT_R+=($F_UPSCL_CALC_R)
+                f_upscl_fact_n_resize_calc "$SKY_ITEM"
+
+                # NOTE: The "skynames" only have the sizes (X and Y) 512 px or 256
+                # px. Therefore, we will always have values for "UPSCL_FACT" (return
+                # in "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}") that generate images of
+                # exactly 1024 px (X and Y) in size. The "TRY_MAX_PX_S" is unnecessary
+                # in this scenario. By Questor
+                F_SKYNAME_N_UPSCL_FACT_R+=(${F_UPSCL_FACT_N_RESIZE_CALC_R[0]})
+
             fi
             F_SKYNAME_N_UPSCL_FACT_R+=("$SKY_ITEM")
         done
@@ -787,28 +809,39 @@ ERROR: \"$F_GET_STDERR_R\""
 # > -----------------------------------------
 # Calculate image upscale factor.
 
+# [Ref(s).: https://stackoverflow.com/a/12723330/3223785 , 
+# https://stackoverflow.com/a/31087503/3223785 , 
+# https://stackoverflow.com/a/68878999/3223785 , 
+# https://stackoverflow.com/a/7553744/3223785 ]
 declare -a VALID_UPSCALE_VALS=()
 if [ "$UPSCALER_IN_USE_S" == "w" ] ; then
     VALID_UPSCALE_VALS=(1 2 4 8 16 32)
 elif [ "$UPSCALER_IN_USE_S" == "r" ] ; then
     VALID_UPSCALE_VALS=(1 2 4)
 fi
-F_UPSCL_CALC_R=0
-function f_upscl_fact_calc(){
-    : 'Calculate image upscale factor.
+declare -a F_UPSCL_FACT_N_RESIZE_CALC_R=()
+function f_upscl_fact_n_resize_calc(){
+    : 'Calculate image upscale factora and resize (if that'\''s the case).
 
     Args:
-        F_IMAGE_FILE (str): Image to set the upscale factor.
+        F_IMAGE_FILE (str): Image to analysis.
 
     Returns:
-        F_UPSCL_CALC_R (int): Upscale factor.
+        F_UPSCL_FACT_N_RESIZE_CALC_R (int): Upscale factor and resize (if that'\''s the case, otherwise "").
     '
 
-    F_IMAGE_FILE=$1
-    F_UPSCL_CALC_R=0
+    local F_IMAGE_FILE=$1
+    F_UPSCL_FACT_N_RESIZE_CALC_R=()
     declare -a IMG_W_H=()
     local HI_VALUE=0
-    local LENGTH_B=0
+    local LO_VALUE=0
+    local A_VALUE=0
+    local B_VALUE=0
+    local F_UPSCL_CALC_NOW=""
+    local HI_LO_TO_X_Y=""
+    local MAX_PX_ADJ_FACTOR=""
+    local LENGTH=${#VALID_UPSCALE_VALS[*]}
+    local i=0
     f_get_stderr_stdout "identify -format \"%w %h\" \"$F_IMAGE_FILE\""
     if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
         local ERROR_NOW="An error occurred while calculating image scaling!
@@ -820,23 +853,60 @@ FILE: \"$F_IMAGE_FILE\""
     IMG_W_H=($F_GET_STDOUT_R)
     if (( IMG_W_H[0] >= IMG_W_H[1] )) ; then
         HI_VALUE=${IMG_W_H[0]}
+        LO_VALUE=${IMG_W_H[1]}
+
+        # s - same
+        HI_LO_TO_X_Y="s"
     else
         HI_VALUE=${IMG_W_H[1]}
+        LO_VALUE=${IMG_W_H[0]}
+
+        # r - reverse
+        HI_LO_TO_X_Y="r"
     fi
 
-    # NOTE: All images that will be processed are multiples of 8 in px. By Questor
-    F_UPSCL_CALC_R=$((1024/$HI_VALUE))
-    if (( F_UPSCL_CALC_R > MAX_UPSCL_FACT_S )) ; then
-        F_UPSCL_CALC_R=$MAX_UPSCL_FACT_S
+    # NOTE: All images that will be processed are multiples of 8 in px. The largest
+    # texture measurement does not exceed 512 px, so "F_UPSCL_CALC_NOW" will never
+    # be less than 2. By Questor
+    F_UPSCL_CALC_NOW=$(bc -l <<< "1024/$HI_VALUE")
+    if (( $(bc -l <<< "$F_UPSCL_CALC_NOW >= $MAX_UPSCL_FACT_S") )); then
+        F_UPSCL_FACT_N_RESIZE_CALC_R+=("$MAX_UPSCL_FACT_S")
+        F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
     else
-        LENGTH_B=${#VALID_UPSCALE_VALS[*]}
-        local i=0
-        for ((i=0;i<=$(($LENGTH_B-1));i++)); do
-            if [ ${VALID_UPSCALE_VALS[$i]} -eq $F_UPSCL_CALC_R ] ; then
+        for ((i=0;i<=$(($LENGTH-1));i++)); do
+            if (( $(bc -l <<< "${VALID_UPSCALE_VALS[$i]} == $F_UPSCL_CALC_NOW") )); then
+
+                # NOTE: Strategy to remove unsupported floating point. By Questor
+                F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$i]}")
+                F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
+
                 break
+            elif (( $(bc -l <<< "${VALID_UPSCALE_VALS[$i]} > $F_UPSCL_CALC_NOW") )); then
+                if [ ${TRY_MAX_PX_S} -eq 0 ] ; then
+                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$((i - 1))]}")
+                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
+                else
+                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$i]}")
+                    MAX_PX_ADJ_FACTOR=$(bc -l <<< "1024/($HI_VALUE*$F_UPSCL_CALC_NOW)")
+                    A_VALUE=1024
+                    B_VALUE=$(bc -l <<< "$LO_VALUE*$F_UPSCL_CALC_NOW*$MAX_PX_ADJ_FACTOR")
+
+                    # NOTE: Round value to the nearest integer. By Questor
+                    B_VALUE=$(bc <<< "($B_VALUE+0.5)/1")
+
+                    # NOTE: Ignore Aspect Ratio ('!' flag) If you want you can force
+                    # "-resize" to ignore the aspect ratio and distort the image
+                    # so it always generates an image exactly the size specified.
+                    # This is done by adding the character '!' to the size. Unfortunately
+                    # this character is also sometimes used for special purposes
+                    # by various UNIX command line shells. So you may have to escape
+                    # the character somehow to preserve it. By Questor
+                    if [ "$HI_LO_TO_X_Y" == "s" ] ; then
+                        F_UPSCL_FACT_N_RESIZE_CALC_R+=("${A_VALUE}x${B_VALUE}\!")
+                    elif [ "$HI_LO_TO_X_Y" == "r" ] ; then
+                        F_UPSCL_FACT_N_RESIZE_CALC_R+=("${B_VALUE}x${A_VALUE}\!")
             fi
-            if [ ${VALID_UPSCALE_VALS[$i]} -gt $F_UPSCL_CALC_R ] ; then
-                F_UPSCL_CALC_R=${VALID_UPSCALE_VALS[$((i - 1))]}
+                fi
                 break
             fi
         done
@@ -855,6 +925,11 @@ FILE: \"$F_IMAGE_FILE\""
 # > -----------------------------------------
 # Listing textures images to be processed and calculate image upscale factor.
 
+# [Ref(s).:  https://superuser.com/a/370982/195840 ,
+# https://stackoverflow.com/a/18093887/3223785 ,
+# https://serverfault.com/a/739037/276753 , 
+# https://www.cyberciti.biz/faq/unix-linux-bash-script-check-if-variable-is-empty ]
+
 declare -a F_TEXTURE_N_UPSCL_FACT_R=()
 function f_list_textures(){
     : 'Listing textures images to be processed and calculate image upscale factor.'
@@ -863,9 +938,6 @@ function f_list_textures(){
     local INPUT_FOLDER=""
     local INPUT_FILE=""
 
-    # [Ref(s).:  https://superuser.com/a/370982/195840 ,
-    # https://stackoverflow.com/a/18093887/3223785 ,
-    # https://serverfault.com/a/739037/276753 ]
     f_process_in_progress "a" " > Listing textures..."
     while IFS= read -r -d '' INPUT_FOLDER; do
         while IFS= read -r -d '' INPUT_FILE; do
@@ -880,18 +952,6 @@ function f_list_textures(){
     f_manage_logs " > Textures listed." "o" 1
 
     local LENGTH=${#F_BMP_IMAGES_R[*]}
-    f_long_task_stats "s" $LENGTH 1 0
-    local i=0
-    for ((i=0;i<=$(($LENGTH-1));i++)); do
-        f_long_task_stats "a"
-        f_upscl_fact_calc "${F_BMP_IMAGES_R[$i]}"
-        F_TEXTURE_N_UPSCL_FACT_R+=("${F_BMP_IMAGES_R[$i]}")
-        F_TEXTURE_N_UPSCL_FACT_R+=($F_UPSCL_CALC_R)
-        f_long_task_stats "o"
-        f_manage_logs " > Upscaling factor calculated: ${F_BMP_IMAGES_R[$i]}
-UPSCALING FACTOR: $F_UPSCL_CALC_R
-$F_LONG_TASK_STATS_R" "o" 1
-    done
     if [ ${LENGTH} -lt 1 ] ; then
         local ERROR_NOW="No \"root\" folder (BMPs folder) found!
 Did you run Automatic Detail Texture Generator 2007 (DTG07) as expected?
@@ -899,6 +959,20 @@ Are the settings in the \"config.bash\" file correct?"
         f_manage_logs "$ERROR_NOW" "e"
         f_error_exit "$ERROR_NOW"
     fi
+    f_long_task_stats "s" $LENGTH 1 0
+    local i=0
+    for ((i=0;i<=$(($LENGTH-1));i++)); do
+        f_long_task_stats "a"
+        f_upscl_fact_n_resize_calc "${F_BMP_IMAGES_R[$i]}"
+        F_TEXTURE_N_UPSCL_FACT_R+=("${F_BMP_IMAGES_R[$i]}")
+        F_TEXTURE_N_UPSCL_FACT_R+=(${F_UPSCL_FACT_N_RESIZE_CALC_R[0]})
+        F_TEXTURE_N_UPSCL_FACT_R+=("${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}")
+        f_long_task_stats "o"
+        f_manage_logs " > Upscaling factor calculated: ${F_BMP_IMAGES_R[$i]}
+UPSCALING FACTOR: ${F_UPSCL_FACT_N_RESIZE_CALC_R[0]}
+RESIZE: "$([ -z "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}" ] && echo '<UNNECESSARY>' || echo "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}")"
+$F_LONG_TASK_STATS_R" "o" 1
+    done
 }
 
 # < -----------------------------------------
@@ -980,17 +1054,24 @@ function f_conv_texture_bmp_to_png(){
     local PNG_DIR=""
     local OUTPUT_FILE=""
     local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    f_long_task_stats "s" $LENGTH 2 0
+    f_long_task_stats "s" $LENGTH 3 0
     local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=2)); do
+    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
         f_long_task_stats "a"
         PNG_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_PNG"
         OUTPUT_FILE="$PNG_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
         mkdir -p "$PNG_DIR"
 
-        # NOTE: We changed the image's blue - the engine's default image transparency
-        # - to the effective PNG format transparency (alpha channel). By Questor
-        f_get_stderr_stdout "convert \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\" -transparent \"#0000ff\" -alpha Associate \"$OUTPUT_FILE\""
+        # f_get_stderr_stdout "convert \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\" -transparent \"#0000ff\" -alpha Associate \"$OUTPUT_FILE\""
+
+        # NOTES:
+        # I - We changed the image's blue - the engine's default image transparency
+        # - to the effective PNG format transparency (alpha channel).
+        # II - We use "-fuzz n%" so that the transparency reaches colors that are
+        # not exactly "#0000ff" since some textures don't use this exact value for
+        # transparency.
+        # By Questor
+        f_get_stderr_stdout "convert \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\" -fuzz 2% -transparent \"#0000ff\" -alpha Associate \"$OUTPUT_FILE\""
 
         if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
             local ERROR_NOW="An error occurred while converting the image to PNG (texture)!
@@ -1011,17 +1092,100 @@ $F_LONG_TASK_STATS_R" "o" 1
 # < --------------------------------------------------------------------------
 
 # > --------------------------------------------------------------------------
-# Modify details (\"*_detail.txt\") to Renderer 1.5c format.
+# Adjust details ("*_detail.txt") files.
 # --------------------------------------
 
 # > -----------------------------------------
-# Modify details (\"*_detail.txt\") to Renderer 1.5c format.
+# Removes textures known to cause map problems.
+
+declare -a TEXTURES_BLACK_LIST=()
+
+# NOTE: Three values are possible...
+# 0 - Blacklist textures not loaded;
+# 1 - Blacklist textures loaded;
+# -1 - Blacklist textures file does not exist or is empty.
+# By Questor
+TEXTURES_BLACK_LIST_LOADED=0
+
+F_DETAILS_TXT_REMOVE_BLACK_LIST_R=""
+function f_details_txt_remove_black_list(){
+    : 'Removes textures known to cause map problems.
+
+    These textures are listed in the file "black_list.txt" in the same folder as
+    this script.
+
+    Args:
+        INPUT_FILE (str): "*_detail.txt" file.
+    '
+
+    if [ ${TEXTURES_BLACK_LIST_LOADED} -eq -1 ] ; then
+        return
+    fi
+    local INPUT_FILE=$1
+    F_DETAILS_TXT_REMOVE_BLACK_LIST_R=""
+    local LENGTH_A=0
+    local FILE_STR=""
+    declare -a TEXTURES_BLACK_LIST=()
+    if [ ${TEXTURES_BLACK_LIST_LOADED} -eq 0 ] ; then
+        f_manage_arrays_n_files "ck" "" "$SCRIPT_DIR_S/black_list.txt"
+        if [ ${F_MANAGE_ARRAYS_N_FILES_R} -eq 1 ] ; then
+            f_manage_arrays_n_files "rd" "TEXTURES_BLACK_LIST" "$SCRIPT_DIR_S/black_list.txt"
+            TEXTURES_BLACK_LIST_LOADED=1
+        else
+            TEXTURES_BLACK_LIST_LOADED=-1
+            return
+        fi
+    fi
+    LENGTH_A=${#TEXTURES_BLACK_LIST[*]}
+    if [ $LENGTH_A -gt 0 ] ; then
+        FILE_STR=$(cat "$INPUT_FILE")
+    else
+        TEXTURES_BLACK_LIST_LOADED=-1
+        return
+    fi
+    declare -a BLACK_LIST_REMOVED=()
+    local i=0
+    for ((i=0;i<=$(($LENGTH_A-1));i++)); do
+        if [[ "$FILE_STR" != *"${TEXTURES_BLACK_LIST[$i]}"* ]] ; then
+        # NOTE: Good performance strategy. It avoids unnecessary IO as the contents
+        # of the file can be checked in memory for each texture in the blacklist
+        # before trying to replace the values with the "sed" command. By Questor
+
+            continue
+        fi
+        f_power_sed_ecp "${TEXTURES_BLACK_LIST[$i]}" 0
+        eval "sed -i '/$F_POWER_SED_ECP_R/d' \"$INPUT_FILE\""
+        BLACK_LIST_REMOVED+=("${TEXTURES_BLACK_LIST[$i]}")
+    done
+    local LENGTH_B=${#BLACK_LIST_REMOVED[*]}
+    if [ $LENGTH_B -eq 0 ] ; then
+        F_DETAILS_TXT_REMOVE_BLACK_LIST_R="<NONE>"
+        return
+    fi
+    local j=0
+    local COMMA_AND=""
+    for ((j=0;j<=$(($LENGTH_B-1));j++)); do
+        if [ $j -eq 0 ] ; then
+            COMMA_AND=""
+        elif [ $(($LENGTH_B-1)) -eq $j ] ; then
+            COMMA_AND=" and "
+        else
+            COMMA_AND=", "
+        fi
+        F_DETAILS_TXT_REMOVE_BLACK_LIST_R="$F_DETAILS_TXT_REMOVE_BLACK_LIST_R$COMMA_AND\"${BLACK_LIST_REMOVED[$j]}\""
+    done
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Adjust details ("*_detail.txt") files to Renderer 1.5c format.
 
 # [Ref(s).: https://stackoverflow.com/a/24230154/3223785 ,
 # https://stackoverflow.com/a/24233771/3223785 ,
 # https://stackoverflow.com/a/27658733/3223785 ]
-function f_modify_details_txt(){
-    : 'Modify details (\"*_detail.txt\") to Renderer 1.5c format.'
+function f_adjust_details_txt(){
+    : 'Adjust details ("*_detail.txt") files to Renderer 1.5c format.'
 
     local INPUT_FILE=""
     f_process_in_progress "a" " > Listing details (\"*_detail.txt\")..."
@@ -1031,11 +1195,13 @@ function f_modify_details_txt(){
     done < <(find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*_detail.txt" -print0)
     f_process_in_progress "o"
     f_manage_logs " > Details (\"*_detail.txt\") listed." "o" 1
-    local LENGTH=${#DETAIL_TXT_FILES[*]}
-    f_long_task_stats "s" $LENGTH
+    local BLACK_LIST_TEXTURES=""
+    local LENGTH_A=${#DETAIL_TXT_FILES[*]}
+    f_long_task_stats "s" $LENGTH_A
     local i=0
-    for ((i=0;i<=$(($LENGTH-1));i++)); do
+    for ((i=0;i<=$(($LENGTH_A-1));i++)); do
         f_long_task_stats "a"
+        f_details_txt_remove_black_list "${DETAIL_TXT_FILES[$i]}"
         sed -i '/	detail\//s/^/	{"base" : "/' "${DETAIL_TXT_FILES[$i]}"
         f_power_sed "	detail/" "\", \"replace\" : \"gfx/detail/_upscaled/" "${DETAIL_TXT_FILES[$i]}" "" 0
         f_power_sed "	1.0	1.0" ".png\", \"replacescale\" : \"1.0 1.0\"}," "${DETAIL_TXT_FILES[$i]}" "" 0
@@ -1044,6 +1210,7 @@ function f_modify_details_txt(){
         mv "${DETAIL_TXT_FILES[$i]}" "${DETAIL_TXT_FILES[$i]::-11}_extra.txt"
         f_long_task_stats "o"
         f_manage_logs " > Detail (\"*_detail.txt\") adjusted: ${DETAIL_TXT_FILES[$i]}
+REMOVED BLACKLISTED TEXTURES: $F_DETAILS_TXT_REMOVE_BLACK_LIST_R
 $F_LONG_TASK_STATS_R" "o" 1
     done
 }
@@ -1239,10 +1406,9 @@ function f_upscale_textures(){
     local UPSCL_DIR=""
     local OUTPUT_FILE=""
     local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    local UPSCL_FACT=0
-    f_long_task_stats "s" $LENGTH 2 0
+    f_long_task_stats "s" $LENGTH 3 0
     local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=2)); do
+    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
         f_long_task_stats "a"
         PNG_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_PNG"
         INPUT_FILE="$PNG_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
@@ -1253,8 +1419,7 @@ function f_upscale_textures(){
             UPSCL_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_UPSCL"
             mkdir -p "$UPSCL_DIR"
             OUTPUT_FILE="$UPSCL_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-            UPSCL_FACT=${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]}
-            f_upscale_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT
+            f_upscale_image "$INPUT_FILE" "$OUTPUT_FILE" ${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]}
             rm -f "$INPUT_FILE"
             f_process_in_progress "o"
             f_long_task_stats "o"
@@ -1278,6 +1443,8 @@ $F_LONG_TASK_STATS_R" "o" 1
 # Compress, move and/or resize a image.
 
 # [Ref(s).: https://stackoverflow.com/a/24421013/3223785 ]
+# https://askubuntu.com/a/271797/134723 , 
+# https://www.halolinux.us/ubuntu-hacks/sharpen-images-at-the-command-line.html ]
 F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R=""
 function f_compress_move_n_or_resize_image(){
     : 'Compress, move and/or resize a image.
@@ -1286,37 +1453,82 @@ function f_compress_move_n_or_resize_image(){
         INPUT_FILE (str): Input image;
         OUTPUT_FILE (str): Output image;
         UPSCL_FACT (Optional[int]): Upscale factor. Required if '\''UPSCALER_IN_USE_S="r"'\''.
+        RESIZE_PARAM (Optional[str]): Upscale factor. May be necessary if "TRY_MAX_PX_S=1".
     '
 
     F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R=""
+    local RESIZE_FACT=0
     local INPUT_FILE=$1
     local OUTPUT_FILE=$2
     local UPSCL_FACT=$3
-    local RESIZE_FACT=0
-    if [ "$UPSCALER_IN_USE_S" == "r" ] && [ $UPSCL_FACT -lt 4 ]; then
-        f_process_in_progress "a" " > Resizing and moving the PNG image..."
+    if [ -z "$UPSCL_FACT" ] ; then
+        UPSCL_FACT=-1
+    fi
+    local RESIZE_PARAM=$4
+    if [ -z "$RESIZE_PARAM" ] ; then
+        RESIZE_PARAM=""
+    fi
+    local SHARPEN_PARAM=""
+    local SHARPENING_ACT=""
+    local SHARPED_ACT=""
+    if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
+        SHARPEN_PARAM=" -sharpen 0x$SHARPEN_IMGS_S"
+        SHARPENING_ACT=", sharpening"
+        SHARPED_ACT=", sharped"
+    fi
+    if [ ${TRY_MAX_PX_S} -eq 1 ] && [ -n "$RESIZE_PARAM" ] ; then
+        f_process_in_progress "a" " > Resizing (TRY_MAX_PX_S=1)$SHARPENING_ACT and moving the PNG image..."
+        f_get_stderr_stdout "convert \"$INPUT_FILE\" -resize $RESIZE_PARAM$SHARPEN_PARAM \"$OUTPUT_FILE\""
+        if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
+            f_process_in_progress "o"
+            local ERROR_NOW=="An error occurred while resizing (TRY_MAX_PX_S=1)$SHARPENING_ACT and moving the PNG image!
+ERROR: $F_GET_STDERR_R
+FILE: $INPUT_FILE"
+            f_manage_logs "$ERROR_NOW" "e"
+            f_error_exit "$ERROR_NOW"
+        fi
+        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="resized (TRY_MAX_PX_S=1)$SHARPED_ACT, moved"
+    elif [ "$UPSCALER_IN_USE_S" == "r" ] && [ $UPSCL_FACT -lt $MAX_UPSCL_FACT_S ]; then
+        f_process_in_progress "a" " > Resizing$SHARPENING_ACT and moving the PNG image..."
 
         # NOTE: Due to a BUG in "realesrgan-ncnn-vulkan" it only supports upscaling
         # to 4. Therefore, we need to make size adjustments (reduce if necessary).
         # By Questor
         # [Ref(s).: https://legacy.imagemagick.org/Usage/resize/ , https://github-com.translate.goog/xinntao/Real-ESRGAN/issues/203?_x_tr_sl=
         # pt&_x_tr_tl=en&_x_tr_hl=en&_x_tr_pto=wapp ]
-        RESIZE_FACT=$((100/(4/$UPSCL_FACT)))
+        RESIZE_FACT=$((100/($MAX_UPSCL_FACT_S/$UPSCL_FACT)))
 
-        f_get_stderr_stdout "convert \"$INPUT_FILE\" -resize $RESIZE_FACT% \"$OUTPUT_FILE\""
+        f_get_stderr_stdout "convert \"$INPUT_FILE\" -resize $RESIZE_FACT%$SHARPEN_PARAM \"$OUTPUT_FILE\""
         if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
             f_process_in_progress "o"
-            local ERROR_NOW=="An error occurred while resizing the PNG image!
+            local ERROR_NOW=="An error occurred while resizing$SHARPENING_ACT and moving the PNG image!
 ERROR: $F_GET_STDERR_R
 FILE: $INPUT_FILE"
             f_manage_logs "$ERROR_NOW" "e"
             f_error_exit "$ERROR_NOW"
         fi
-        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="resized, moved"
+        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="resized$SHARPED_ACT, moved"
     else
-        f_process_in_progress "a" " > Moving the PNG image..."
+        SHARPENING_ACT="Moving"
+        if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
+            SHARPENING_ACT="Sharpening and moving"
+            SHARPED_ACT="sharped, "
+        fi
+        f_process_in_progress "a" " > $SHARPENING_ACT the PNG image..."
+        if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
+            f_get_stderr_stdout "convert \"$INPUT_FILE\"$SHARPEN_PARAM \"$OUTPUT_FILE\""
+            if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
+                f_process_in_progress "o"
+                local ERROR_NOW=="An error occurred while sharpening and moving the PNG image!
+ERROR: $F_GET_STDERR_R
+FILE: $INPUT_FILE"
+                f_manage_logs "$ERROR_NOW" "e"
+                f_error_exit "$ERROR_NOW"
+            fi
+        else
         mv "$INPUT_FILE" "$OUTPUT_FILE"
-        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="moved"
+        fi
+        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="${SHARPED_ACT}moved"
     fi
     rm -f "$INPUT_FILE"
     f_process_in_progress "o"
@@ -1362,7 +1574,6 @@ function f_clean_skyname_fd(){
     else
         f_manage_logs " > Cleaning \"skyname\" folder skipped." "o" 1
     fi
-
 }
 
 # < -----------------------------------------
@@ -1399,7 +1610,7 @@ function f_compress_move_n_or_resize_skynames(){
                     mkdir -p "$UPSCALED_DIR"
                 fi
                 OUTPUT_FILE="$UPSCALED_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-                f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT
+                f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT ""
                 f_long_task_stats "o"
             else
                 F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="<SKIPPED ITEM>"
@@ -1497,11 +1708,10 @@ function f_compress_move_n_or_resize_textures(){
     local INPUT_FILE=""
     local BSP_ENVS_FD=""
     local OUTPUT_FILE=""
-    local UPSCL_FACT=0
     local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    f_long_task_stats "s" $LENGTH 2 0
+    f_long_task_stats "s" $LENGTH 3 0
     local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=2)); do
+    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
         f_long_task_stats "a"
         UPSCL_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_UPSCL"
         INPUT_FILE="$UPSCL_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
@@ -1510,8 +1720,7 @@ function f_compress_move_n_or_resize_textures(){
 
             BSP_ENVS_FD="${F_TEXTURE_N_UPSCL_FACT_R[$i]%/*/*}"
             OUTPUT_FILE="$BSP_ENVS_FD/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-            UPSCL_FACT=${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]}
-            f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT
+            f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" ${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]} "${F_TEXTURE_N_UPSCL_FACT_R[$((i + 2))]}"
             f_long_task_stats "o"
         else
             F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="<SKIPPED ITEM>"
@@ -1536,12 +1745,13 @@ $F_LONG_TASK_STATS_R" "o" 1
 # Control and manage script functions.
 
 USR_RESUME_PROCESS=0
-f_resume_process "ck" "F_TEXTURE_N_UPSCL_FACT_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_RESUME_PROCESS_R))
-f_resume_process "ck" "F_BACKUP_FILES_N_FOLDERS_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_RESUME_PROCESS_R))
-f_resume_process "ck" "F_SKYNAME_N_UPSCL_FACT_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_RESUME_PROCESS_R))
+RESUME_PROCESS_MEMBERS=0
+f_manage_arrays_n_files "ck" "F_TEXTURE_N_UPSCL_FACT_R"
+RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
+f_manage_arrays_n_files "ck" "F_BACKUP_FILES_N_FOLDERS_R"
+RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
+f_manage_arrays_n_files "ck" "F_SKYNAME_N_UPSCL_FACT_R"
+RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
 if [ ${RESUME_PROCESS_MEMBERS} -eq 3 ] ; then
     f_div_section
     f_yes_no "There is an unfinished upscale process.
@@ -1555,13 +1765,13 @@ Do you want to resume the process? (\"y\" highly recommended)"
 fi
 
 if [ ${USR_RESUME_PROCESS} -eq 1 ] ; then
-    f_resume_process "rd" "F_TEXTURE_N_UPSCL_FACT_R"
-    f_resume_process "rd" "F_BACKUP_FILES_N_FOLDERS_R"
-    f_resume_process "rd" "F_SKYNAME_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "rd" "F_TEXTURE_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "rd" "F_BACKUP_FILES_N_FOLDERS_R"
+    f_manage_arrays_n_files "rd" "F_SKYNAME_N_UPSCL_FACT_R"
 else
-    f_resume_process "rm" "F_TEXTURE_N_UPSCL_FACT_R"
-    f_resume_process "rm" "F_BACKUP_FILES_N_FOLDERS_R"
-    f_resume_process "rm" "F_SKYNAME_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "rm" "F_TEXTURE_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "rm" "F_BACKUP_FILES_N_FOLDERS_R"
+    f_manage_arrays_n_files "rm" "F_SKYNAME_N_UPSCL_FACT_R"
     f_manage_logs " > Check disk space started." "o" 1
     f_check_disk_space
     f_manage_logs " > Backup files and folders started." "o" 1
@@ -1579,14 +1789,14 @@ else
     f_manage_logs " > Convert texture BMP to PNG started." "o" 1
     f_conv_texture_bmp_to_png
     f_manage_logs " > Modify details (\"*_detail.txt\") started." "o" 1
-    f_modify_details_txt
+    f_adjust_details_txt
     f_manage_logs " > Add \"skynames\" to extras (\"*_extra.txt\") started." "o" 1
     f_add_skynames_to_extras_txt
-    f_resume_process "ct" "F_TEXTURE_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "ct" "F_TEXTURE_N_UPSCL_FACT_R"
     f_manage_logs " > Failsafe file \"F_TEXTURE_N_UPSCL_FACT_R\" created." "o" 1
-    f_resume_process "ct" "F_BACKUP_FILES_N_FOLDERS_R"
+    f_manage_arrays_n_files "ct" "F_BACKUP_FILES_N_FOLDERS_R"
     f_manage_logs " > Failsafe file \"F_BACKUP_FILES_N_FOLDERS_R\" created." "o" 1
-    f_resume_process "ct" "F_SKYNAME_N_UPSCL_FACT_R"
+    f_manage_arrays_n_files "ct" "F_SKYNAME_N_UPSCL_FACT_R"
     f_manage_logs " > Failsafe file \"F_SKYNAME_N_UPSCL_FACT_R\" created." "o" 1
     f_manage_logs " > The script has enabled failsafe mode." "o" 1
     f_enter_to_cont "From now this script can be interrupted (use Ctrl+c) at any time 
@@ -1601,9 +1811,9 @@ f_manage_logs " > Compress, move and/or resize \"skynames\" started." "o" 1
 f_compress_move_n_or_resize_skynames
 f_manage_logs " > Compress, move and/or resize \"textures\" started." "o" 1
 f_compress_move_n_or_resize_textures
-f_resume_process "rm" "F_TEXTURE_N_UPSCL_FACT_R"
-f_resume_process "rm" "F_BACKUP_FILES_N_FOLDERS_R"
-f_resume_process "rm" "F_SKYNAME_N_UPSCL_FACT_R"
+f_manage_arrays_n_files "rm" "F_TEXTURE_N_UPSCL_FACT_R"
+f_manage_arrays_n_files "rm" "F_BACKUP_FILES_N_FOLDERS_R"
+f_manage_arrays_n_files "rm" "F_SKYNAME_N_UPSCL_FACT_R"
 
 # < -----------------------------------------
 

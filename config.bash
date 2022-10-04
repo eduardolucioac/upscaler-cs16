@@ -6,8 +6,7 @@
 # IMPORTANT: Windows folder paths are case INsensitive, Linux is NOT! By Questor
 
 # NOTE: Folder containing the main CS 1.6 executable ("hl.exe", for example). By Questor
-# WORK_FOLDER_S="/home/eduardolac/Data1/Games/CS_WORKING_FOLDERS/_UPSCALE_IMAGES/Counter Strike 1.6 RE-MOD v1.5.0b/Counter Strike 1.6 RE-MOD"
-WORK_FOLDER_S="/home/eduardolac/Data1/Games/Counter Strike 1.6 RE-MOD v1.5.0b/Counter Strike 1.6 RE-MOD"
+WORK_FOLDER_S="/home/<SOME_USER>/Counter Strike 1.6"
 
 # NOTE: Subfolder "cstrike" (relative). By Questor
 WORK_FOLDER_CSTRIKE_S="$WORK_FOLDER_S/cstrike"
@@ -54,7 +53,7 @@ WAIFU2X_BIN_S="waifu2x-ncnn-vulkan"
 # NOTE: Realesrgan binary name. By Questor
 REALESRGAN_BIN_S="realesrgan-ncnn-vulkan"
 
-# NOTE: Enable "tta mode". By Questor
+# NOTE: Enable "tta mode" (1 - ON/0 - OFF). By Questor
 # IMPORTANT: Enable this mode only if you have a powerful hardware setup, as it can
 # make the process up to 8 times longer (it's already very time consuming naturally)
 # for a quality gain of up to 15%. By Questor
@@ -72,7 +71,7 @@ RIPENT_CMD_S='export WINEDEBUG=-all && export POL_IgnoreWineErrors=True && /usr/
 #   * Using Wine with PlayOnLinux (Recommended)
 # RIPENT_CMD_S='export WINEDEBUG=-all && export POL_IgnoreWineErrors=True && /usr/share/playonlinux4/playonlinux --run "ripent" -export "$(winepath -w "${BSP_FILES[$i]}" 2> /dev/null)"'
 #   * Using a Wine prefix
-# RIPENT_CMD_S='WINEDEBUG=-all WINEPREFIX="/home/eduardolac/vluzacns_zhlt_v34" wine "$SCRIPT_DIR_S/Vluzacn'"'"'s ZHLT v34/tools/ripent.exe" -export "$(winepath -w "${BSP_FILES[$i]}" 2> /dev/null)"'
+# RIPENT_CMD_S='WINEDEBUG=-all WINEPREFIX="/home/<SOME_USER>/vluzacns_zhlt_v34" wine "$SCRIPT_DIR_S/Vluzacn'"'"'s ZHLT v34/tools/ripent.exe" -export "$(winepath -w "${BSP_FILES[$i]}" 2> /dev/null)"'
 
 # NOTE: Automatic Detail Texture Generator 2007 command (DTG07) command. Do not use double quotes around the value of this parameter.
 DTG07_CMD_S='export WINEDEBUG=-all && export POL_IgnoreWineErrors=True && /usr/share/playonlinux4/playonlinux --run "DetailTextureGen"'
@@ -83,20 +82,36 @@ DTG07_CMD_S='export WINEDEBUG=-all && export POL_IgnoreWineErrors=True && /usr/s
 #   * Using Wine with PlayOnLinux (Recommended)
 # DTG07_CMD_S='export WINEDEBUG=-all && export POL_IgnoreWineErrors=True && /usr/share/playonlinux4/playonlinux --run "DetailTextureGen"'
 #   * Using a Wine prefix
-# DTG07_CMD_S='WINEDEBUG=-all WINEPREFIX="/home/eduardolac/cs16_txt_gen" wine "$SCRIPT_DIR_S/Automatic Detail Texture Generator 2007/DetailTextureGen.exe"'
+# DTG07_CMD_S='WINEDEBUG=-all WINEPREFIX="/home/<SOME_USER>/cs16_txt_gen" wine "$SCRIPT_DIR_S/Automatic Detail Texture Generator 2007/DetailTextureGen.exe"'
 
-# NOTE: Wine "drive_c". By Questor
-WINE_DRIVE_C_S="/home/eduardolac/.PlayOnLinux/wineprefix/cs16_txt_gen/drive_c"
+# NOTE: Detail Texture Generator 2007 (DTG07) wine "drive_c". By Questor
+WINE_DRIVE_C_S="/home/<SOME_USER>/.PlayOnLinux/wineprefix/cs16_txt_gen/drive_c"
 
 # WINE_DRIVE_C_S EXAMPLES:
 #   * Using system Wine
 #   WINE_DRIVE_C_S=~/".wine/drive_c"
 #   * Using a Wine prefix with PlayOnLinux
-#   WINE_DRIVE_C_S="/home/eduardolac/.PlayOnLinux/wineprefix/cs16_txt_gen/drive_c"
+#   WINE_DRIVE_C_S="/home/<SOME_USER>/.PlayOnLinux/wineprefix/cs16_txt_gen/drive_c"
 #   * Using a Wine prefix
-#   WINE_DRIVE_C_S="/home/eduardolac/cs16_txt_gen/drive_c"
+#   WINE_DRIVE_C_S="/home/<SOME_USER>/cs16_txt_gen/drive_c"
 
 # NOTE: Keep the last X logs. By Questor
 LOGS_KEEP_S=5
+
+# NOTE: It will try to keep textures as sized (1024 px) as possible for their largest
+# dimension (X or Y). This will always happen if calculations that use the "MAX_UPSCL_FACT_S"
+# parameter do not allow multiple maximums of the texture's original resolution to
+# exactly 1024 px for its largest dimension. Very small textures that do not exceed
+# 1024 px when multiplied by "MAX_UPSCL_FACT_S" do not fit into this strategy as
+# overscaling will yield no benefit in virtually all cases (1 - ON/0 - OFF). By Questor
+TRY_MAX_PX_S=1
+
+# NOTE: Due to limitations of the original textures and the limitations of the CS 1.6
+# engine itself, it is not possible to effectively use the resolutions reached by the
+# upscaling process. So sharper images will result in better results with the "gl_texturemode GL_LINEAR_MIPMAP_LINEAR"
+# ("userconfig.cfg") setting (1~3, 1 - Gives good results, -1 - OFF).
+# [Ref(s).: http://cs1-6cfg.blogspot.com/p/cs-16-client-and-console-commands.html , 
+# https://www.halolinux.us/ubuntu-hacks/sharpen-images-at-the-command-line.html ]
+SHARPEN_IMGS_S=1
 
 # < -----------------------------------------

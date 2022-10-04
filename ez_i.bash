@@ -531,7 +531,8 @@ F_POWER_SED_ECP_R=""
 f_power_sed_ecp() {
     : 'Escape strings for the "sed" command.
 
-    Escaped characters will be processed as is (e.g. /n, /t ...).
+    Escaped characters will be processed as is (e.g. /n, /t ...). Recommended to
+    use the "-z" argument for "sed".
 
     Args:
         F_PSE_VAL_TO_ECP (str): Value to be escaped.

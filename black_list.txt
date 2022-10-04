@@ -1,0 +1,4 @@
+de_fog/{svet_low
+de_rex/rex_wall02
+halflife/{blue
+halflife/{invisible
