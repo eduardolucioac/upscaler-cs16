@@ -1,0 +1,29 @@
+# Work in progress of an unfinished run. It is rebuilt from the maps and
+# carries no information the scan cannot produce again.
+__FAILSAFE__/
+
+# Written as it runs; the last LOGS_KEEP_S of each are kept on disk.
+logs/
+
+# Python bytecode cache, rebuilt on every run.
+__pycache__/
+*.pyc
+
+# Editor and desktop leftovers.
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# NOTE: The libraries under "ez_i/" and "json-like/" are VENDORED - their
+# FILES are versioned here so that a plain clone of this project has
+# everything it needs, with no submodule to initialise.
+#
+# They are also working clones of their own repositories, so that they can be
+# developed in place and pushed from here. Their ".git" folders never travel
+# with this one: git treats that name as special and refuses to version it,
+# whatever any rule says. Nothing has to be written here for that.
+#
+# The one thing to remember: a change to a library file lives in TWO
+# repositories. Committing it in "ez_i/" alone leaves this project carrying
+# the older copy, and nothing warns about it.

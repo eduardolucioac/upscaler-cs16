@@ -5,8 +5,7 @@
 # This way it correctly works with either: "sh ./my_script.bash" or "bash ./my_script.bash"
 # or "./my_script.bash".
 
-if [ -z "$BASH_VERSION" ]
-then
+if [ -z "$BASH_VERSION" ]; then
     exec bash "$0" "$@"
 fi
 
@@ -18,10 +17,38 @@ SCRIPT_DIR_S="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # NOTE: Load ez_i library (in reality a bash script). It provides a number of cool
 # features for creating interactive bash scripts, including installers. By Questor
 # [Ref(s).: https://github.com/eduardolucioac/ez_i ]
-. $SCRIPT_DIR_S/ez_i.bash
+. "$SCRIPT_DIR_S/ez_i/ez_i.bash"
+
+# NOTE: Load json-like. It gives BASH the nested objects and arrays it does not
+# have, which is what the pipeline's model is built out of. Before it, the same
+# data lived in flat arrays where position "i" was a path, "i+1" an upscale
+# factor and "i+2" a resize - unreadable and easy to get wrong. By Questor
+# [Ref(s).: https://github.com/eduardolucioac/json-like ]
+. "$SCRIPT_DIR_S/json-like/json-like.bash"
 
 # NOTE: Load configurations. By Questor
-. $SCRIPT_DIR_S/config.bash
+. "$SCRIPT_DIR_S/config.bash"
+
+# NOTE: The native BSP/WAD3 reader. It replaced "ripent.exe", "HLExtract.exe",
+# Automatic Detail Texture Generator 2007 and, with them, Wine. By Questor
+ASSETS_TOOL_S="$SCRIPT_DIR_S/tools/cs16_assets.py"
+
+# NOTE: Where the work in progress lives. Everything in here is disposable:
+# losing it costs time, never results. By Questor
+FAILSAFE_DIR_S="$SCRIPT_DIR_S/__FAILSAFE__"
+SCAN_FILE_S="$FAILSAFE_DIR_S/scan.json"
+WORK_DIR_S="$FAILSAFE_DIR_S/_WORK"
+SOURCE_DIR_S="$WORK_DIR_S/_SOURCE"
+UPSCALED_DIR_S="$WORK_DIR_S/_UPSCL"
+
+# NOTE: Final destinations, absolute. By Questor
+FINAL_DETAIL_DIR_S="$WORK_FOLDER_CSTRIKE_S/$UPSCALED_DETAIL_REL_S"
+FINAL_ENV_DIR_S="$WORK_FOLDER_CSTRIKE_S/$UPSCALED_ENV_REL_S"
+
+# NOTE: Set by "f_check_requirements"; ImageMagick 7 renamed "convert" to
+# "magick" and the old name now prints a deprecation warning to stderr, which
+# this script would otherwise read as a failure. By Questor
+MAGICK_BIN_S=""
 
 # > --------------------------------------------------------------------------
 # Log management.
@@ -37,18 +64,14 @@ SCRIPT_DIR_S="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 function f_clean_old_logs(){
     : 'Delete all log files but the most recent "LOGS_KEEP_S" files.'
 
-    f_chk_fd_fl "$SCRIPT_DIR_S/logs/output" "d"
-    if [ ${CHK_FD_FL_R} -eq 1 ] && ls -tp "$SCRIPT_DIR_S/logs/output"**/* 1> /dev/null 2>&1 ; then
-        ls -tp "$SCRIPT_DIR_S/logs/output"**/* | grep -v '/$' | tail -n +$((LOGS_KEEP_S+1)) | xargs -d '\n' -r rm --
-    fi
-    f_chk_fd_fl "$SCRIPT_DIR_S/logs/error" "d"
-    if [ ${CHK_FD_FL_R} -eq 1 ] && ls -tp "$SCRIPT_DIR_S/logs/error"**/* 1> /dev/null 2>&1 ; then
-        ls -tp "$SCRIPT_DIR_S/logs/error"**/* | grep -v '/$' | tail -n +$((LOGS_KEEP_S+1)) | xargs -d '\n' -r rm --
-    fi
+    local LOG_KIND=""
+    for LOG_KIND in "output" "error"; do
+        ez_i.clean_old_logs "$SCRIPT_DIR_S/logs/$LOG_KIND" "$LOGS_KEEP_S"
+    done
 }
 
 # NOTE: Clears old logs regardless of the reason the script was terminated. By Questor
-f_ez_trap_add "f_clean_old_logs" SIGINT SIGTERM ERR EXIT
+ez_i.trap_add "f_clean_old_logs" SIGINT SIGTERM ERR EXIT
 
 # < -----------------------------------------
 
@@ -61,8 +84,8 @@ function f_manage_logs(){
     : 'Allows you to manage script logs easily.
 
     Args:
-        VALUE_TO_INSERT (str): Value to be inserted in the log;
-        LOG_TYPE (str): o - Error log; e - Output log.
+        VALUE_TO_INSERT (str): Value to be inserted in the log.
+        LOG_TYPE (str): "o" - Output log; "e" - Error log.
         VAL_INS_ON_SCREEN (Optional[int]): 0 - Will NOT print "VALUE_TO_INSERT" on
     screen; 1 - Will PRINT "VALUE_TO_INSERT" on screen. Default 0.
     '
@@ -70,32 +93,92 @@ function f_manage_logs(){
     local VALUE_TO_INSERT=$1
     local LOG_TYPE=$2
     local VAL_INS_ON_SCREEN=$3
-    if [ -z "$VAL_INS_ON_SCREEN" ] ; then
+    if [ -z "$VAL_INS_ON_SCREEN" ]; then
         VAL_INS_ON_SCREEN=0
     fi
     case "$LOG_TYPE" in
         "o") # Output
-            if [ -z "$OUTPUT_LOG_PATH_N_NAME" ] ; then
-                f_log_manager "$VALUE_TO_INSERT" 0 1 "$SCRIPT_DIR_S/logs/output" $VAL_INS_ON_SCREEN
-                OUTPUT_LOG_PATH_N_NAME="$F_LOG_MANAGER_R"
+            if [ -z "$OUTPUT_LOG_PATH_N_NAME" ]; then
+                ez_i.log OUTPUT_LOG_PATH_N_NAME "$VALUE_TO_INSERT" 0 "new" \
+                    "$SCRIPT_DIR_S/logs/output" "$VAL_INS_ON_SCREEN"
             else
-                f_log_manager "$VALUE_TO_INSERT" "$OUTPUT_LOG_PATH_N_NAME" 0 "" $VAL_INS_ON_SCREEN
+                ez_i.log "" "$VALUE_TO_INSERT" 0 "$OUTPUT_LOG_PATH_N_NAME" "" "$VAL_INS_ON_SCREEN"
             fi
         ;;
         "e") # Error
-            if [ -z "$ERROR_LOG_PATH_N_NAME" ] ; then
-                f_log_manager "$VALUE_TO_INSERT" 1 1 "$SCRIPT_DIR_S/logs/error" $VAL_INS_ON_SCREEN
-                ERROR_LOG_PATH_N_NAME="$F_LOG_MANAGER_R"
+            if [ -z "$ERROR_LOG_PATH_N_NAME" ]; then
+                ez_i.log ERROR_LOG_PATH_N_NAME "$VALUE_TO_INSERT" 1 "new" \
+                    "$SCRIPT_DIR_S/logs/error" "$VAL_INS_ON_SCREEN"
             else
-                f_log_manager "$VALUE_TO_INSERT" "$ERROR_LOG_PATH_N_NAME" 0 "" $VAL_INS_ON_SCREEN
+                ez_i.log "" "$VALUE_TO_INSERT" 1 "$ERROR_LOG_PATH_N_NAME" "" "$VAL_INS_ON_SCREEN"
             fi
         ;;
         *)
             local ERROR_NOW="Invalid option! (f_manage_logs)"
             f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
+            ez_i.error_exit "$ERROR_NOW"
         ;;
     esac
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Log an error and stop.
+
+function f_fail(){
+    : 'Log an error and stop the script.
+
+    Args:
+        MESSAGE (str): What went wrong, and anything that helps fix it.
+    '
+
+    local MESSAGE=$1
+    ez_i.progress "o"
+    f_manage_logs "$MESSAGE" "e"
+    ez_i.error_exit "$MESSAGE"
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Run a command, stopping the script if it fails.
+
+# NOTE: This replaces the eight line "check stderr, check exit code, build a
+# message, log it, exit" block that used to be copied after every single
+# external command in this script. By Questor
+F_RUN_R=""
+function f_run(){
+    : 'Run a command and stop the script if it fails.
+
+    Args:
+        COMMAND (str): Command line to run. It is evaluated, so every path in
+    it must already be quoted.
+        CONTEXT (str): What was being attempted, for the error message.
+        ERROR_ON_STDERR (Optional[int]): 1 - Anything on stderr is a failure;
+    0 - Only a non zero exit code is. Default 1.
+
+    Returns:
+        F_RUN_R (str): What the command wrote to stdout.
+        F_RUN_RESULT (assoc): The whole result, as "ez_i.run" fills it in.
+    '
+
+    local COMMAND=$1
+    local CONTEXT=$2
+    local ERROR_ON_STDERR=$3
+    if [ -z "$ERROR_ON_STDERR" ]; then
+        ERROR_ON_STDERR=1
+    fi
+    declare -gA F_RUN_RESULT=()
+    ez_i.run F_RUN_RESULT "$COMMAND"
+    F_RUN_R="${F_RUN_RESULT[stdout]}"
+    if [ "${F_RUN_RESULT[status]}" -gt 0 ] \
+        || { [ ${ERROR_ON_STDERR} -eq 1 ] && [ -n "${F_RUN_RESULT[stderr]}" ]; }; then
+        f_fail "$CONTEXT
+EXIT CODE: ${F_RUN_RESULT[status]}
+ERROR: ${F_RUN_RESULT[both]}
+COMMAND: $COMMAND"
+    fi
 }
 
 # < -----------------------------------------
@@ -106,16 +189,17 @@ function f_manage_logs(){
 
 # [Ref(s).: https://opensource.com/article/20/6/bash-trap ]
 function f_canceled_by_user(){
-    : 'Displays an additional warning and adds a log entry if the user cancels execution
-    with Ctrl+c.
+    : 'Displays an additional warning and adds a log entry if the user cancels
+    execution with Ctrl+c.
     '
 
     f_manage_logs " > The execution was terminated!
 CAUSE: Canceled by user." "o"
-    f_okay_exit "Canceled by user."
+    ez_i.okay_exit "Canceled by user.
+Run this script again to resume where it left off."
 }
 
-f_ez_trap_add "f_canceled_by_user" SIGINT
+ez_i.trap_add "f_canceled_by_user" SIGINT
 
 # < -----------------------------------------
 
@@ -125,16 +209,16 @@ f_ez_trap_add "f_canceled_by_user" SIGINT
 # Start.
 # --------------------------------------
 
-f_manage_logs " > USCS16 - UpScaler CS 1.6 started." "o"
+f_manage_logs " > UPSCALER-CS16 - UpScaler CS 1.6 started." "o"
 
 read -r -d '' TITLE_F << "HEREDOC"
-USCS16 - UpScaler CS 1.6
+UPSCALER-CS16 - UpScaler CS 1.6
 HEREDOC
 
 # NOTE: For versioning use "MAJOR.MINOR.REVISION.BUILDNUMBER". By Questor
 # [Ref(s).: http://programmers.stackexchange.com/questions/24987/what-exactly-is-the-build-number-in-major-minor-buildnumber-revision ]
 read -r -d '' VERSION_F << "HEREDOC"
-0.1.0.0
+0.2.0.0
 HEREDOC
 
 read -r -d '' ABOUT_F << "HEREDOC"
@@ -146,30 +230,29 @@ HEREDOC
 read -r -d '' WARNINGS_F << "HEREDOC"
 - We INSTRUCT you...
     READ the README.md.
-    INSTALL ALL NECESSARY DEPENDENCIES: Waifu2x (waifu2x-ncnn-vulkan)/Realesrgan 
-        (realesrgan-ncnn-vulkan) and ImageMagick (convert, identify), etc...
-    CHECK FOR PREVIOUS RUNS. If there is previous runs consider this variant in the 
-        process.
+    INSTALL ALL NECESSARY DEPENDENCIES. The script checks for them before it
+        starts and tells you exactly what is missing.
     Although this is not mandatory, BACKUP ALL YOUR DATA!
     Make sure you have ENOUGH FREE SPACE on your hard drive.
-    TO CANCEL the process at any time use Ctrl+c.
+    TO CANCEL the process at any time use Ctrl+c. The run RESUMES where it
+        left off the next time you start it.
 
 - We NOTICE you...
-    This script assumes that your Linux distribution has a all necessary "default" 
-        dependencies. This may include some common components like grep, sed, awk, 
-        blah, blah, blah... (It is virtually certain that all necessary components
-        are present).
-    IMAGE UPSCALING IS A LONG, LONG PROCESS that uses a lot of computational resources.
-    THE WHOLE PROCESS CAN TAKE HOURS OR DAYS; depending on your machine configuration
-        and the number of maps (*.bsp) to be processed.
-    Results DEPEND ON THE QUALITY OF YOUR MAPS. Maps with very small or bad textures 
-        will not have good results. Don't expect a miracle. But in general we will 
-        have BETTER DEFINITION AND CLARITY of textures.
-    Metahook doesn't support detail textures =[ .
+    IMAGE UPSCALING IS A LONG PROCESS that uses a lot of computational
+        resources. IT CAN TAKE HOURS; depending on your machine and on the
+        number of maps (*.bsp) to be processed.
+    Each distinct image is upscaled ONCE, no matter how many maps use it, so
+        a second map that shares textures with the first costs almost nothing.
+    Results DEPEND ON THE QUALITY OF YOUR MAPS. Maps with very small or bad
+        textures will not have good results. Don't expect a miracle. But in
+        general we will have BETTER DEFINITION AND CLARITY of textures.
+    NOTHING in your "cstrike" folder is deleted or overwritten by this script
+        except the "*_detail.txt" files it converts, and those are backed up
+        first. Your WAD files are only ever READ.
 
 - We WARNING you...
-    THIS SCRIPT AND RESULTING PRODUCTS COMES WITH ABSOLUTELY NO WARRANTY! USE AT 
-    YOUR OWN RISK! WE ARE NOT RESPONSIBLE FOR ANY DAMAGE TO YOURSELF, HARDWARE, OR 
+    THIS SCRIPT AND RESULTING PRODUCTS COMES WITH ABSOLUTELY NO WARRANTY! USE AT
+    YOUR OWN RISK! WE ARE NOT RESPONSIBLE FOR ANY DAMAGE TO YOURSELF, HARDWARE, OR
     OTHERS!
 HEREDOC
 
@@ -181,8 +264,8 @@ https://www.linkedin.com/in/eduardo-software-livre/
 Free software! Embrace that idea!
 HEREDOC
 
-TUX=$(cat $SCRIPT_DIR_S/tux.txt)
-f_start "$TITLE_F" "$VERSION_F" "$ABOUT_F$TUX" "$WARNINGS_F" "$COMPANY_F"
+TUX=$(cat "$SCRIPT_DIR_S/tux.txt")
+ez_i.start "" "$TITLE_F" "$VERSION_F" "$ABOUT_F$TUX" "$WARNINGS_F" "$COMPANY_F"
 
 # < --------------------------------------------------------------------------
 
@@ -190,104 +273,89 @@ f_start "$TITLE_F" "$VERSION_F" "$ABOUT_F$TUX" "$WARNINGS_F" "$COMPANY_F"
 # Terms and license.
 # --------------------------------------
 
-TERMS_LICEN_F=$(cat $SCRIPT_DIR_S/complete_license.txt)
-f_terms_licen "$TERMS_LICEN_F"
+# NOTE: Read explicitly rather than with a bare "cat", so a missing file
+# stops the script here instead of presenting an EMPTY licence for the user
+# to accept. By Questor
+if [ ! -f "$SCRIPT_DIR_S/complete_license.txt" ]; then
+    echo "ERROR! \"complete_license.txt\" is missing from \"$SCRIPT_DIR_S\"." >&2
+    exit 1
+fi
+TERMS_LICEN_F=$(cat "$SCRIPT_DIR_S/complete_license.txt")
+ez_i.terms "$TERMS_LICEN_F"
 
 f_manage_logs " > Terms and license accepted." "o" 1
 
 # < --------------------------------------------------------------------------
 
 # > --------------------------------------------------------------------------
-# Manage arrays and files generated with the contents of these arrays.
+# Check that everything the run needs is present.
 # --------------------------------------
 
 # > -----------------------------------------
-# Manage arrays and files generated with the contents of these arrays.
+# Check that everything the run needs is present.
 
-# [Ref(s).: https://unix.stackexchange.com/a/46326/61742 ,
-# https://askubuntu.com/a/318211/134723 ,
-# https://stackoverflow.com/a/6843928/3223785 ,
-# https://unix.stackexchange.com/a/83850/61742 ,
-# https://superuser.com/a/1299715/195840 ,
-# https://stackoverflow.com/a/793867/3223785 ,
-# https://stackoverflow.com/a/638980/3223785 ,
-# https://stackoverflow.com/a/20243503/3223785 ,
-# https://stackoverflow.com/a/11395181/3223785 ]
-F_MANAGE_ARRAYS_N_FILES_R=0
-function f_manage_arrays_n_files(){
-    : 'Manage arrays and files generated with the contents of these arrays.
+function f_check_requirements(){
+    : 'Check every external program and folder the run needs.
 
-    Args:
-        F_RP_OPTION (str): "ck" - Checks if there is a file with the array contents.
-    "ct" - Creates a file from the the array contents. "rd" - Reads the file contents
-    to an array. rm - Removes the file with the array'\''s contents.
-        F_RP_TARGET (str)(by reference): It'\''s basically the name of the array
-    and the file (if F_FILE_PATH is <EMPTY/NOT INFORMED>) you want to create or
-    read. It will be OPTIONAL IF F_FILE_PATH is <NOT EMPTY> and F_RP_OPTION equals
-    "ck".
-        F_FILE_PATH (Optional[str]): <EMPTY/NOT INFORMED> - For actions that involve
-    resuming a previous process (Failsafe). Array files in the "__FAILSAFE__" folder.
-    <NOT EMPTY> - For other situations. Array files in the informed path. Default
-    <EMPTY/NOT INFORMED>.
-
-    Returns:
-        F_MANAGE_ARRAYS_N_FILES_R (int)(if F_RP_OPTION equals "ck"): 0 - If the file
-    with the array contents does NOT EXIST. 1 - Otherwise.
+    Everything missing is collected and reported at once, rather than failing
+    on the first one and making the user discover them one at a time.
     '
 
-    F_MANAGE_ARRAYS_N_FILES_R=0
-    local F_RP_OPTION=$1
-    local F_RP_TARGET=$2
-    if [ "$F_RP_OPTION" != "ck" ] && [ -n "$F_RP_TARGET" ] ; then
-        declare -n F_RP_TARGET_ARR=$F_RP_TARGET
-    fi
-    local F_FILE_PATH=$3
-    local FOLDER_PATH=""
-    local FILE_PATH=""
-    if [ -n "$F_FILE_PATH" ] ; then
-        FILE_PATH="$F_FILE_PATH"
+    ez_i.progress "a" " > Checking requirements..."
+    local PROBLEMS=""
+
+    # NOTE: ImageMagick 7 renamed "convert" to "magick" and made the old name
+    # print a deprecation warning TO STDERR. Since this script treats stderr
+    # as failure, using "convert" on a current distribution would abort the
+    # run on the very first image. By Questor
+    if command -v magick > /dev/null 2>&1; then
+        MAGICK_BIN_S="magick"
+    elif command -v convert > /dev/null 2>&1; then
+        MAGICK_BIN_S="convert"
     else
-        FOLDER_PATH="$SCRIPT_DIR_S/__FAILSAFE__"
-        FILE_PATH="$FOLDER_PATH/$F_RP_TARGET"
+        PROBLEMS="$PROBLEMS
+    ImageMagick (\"magick\", or \"convert\" on version 6)"
     fi
-    case "$F_RP_OPTION" in
-        "ck") # ChecK
-            f_chk_fd_fl "$FILE_PATH" "f"
-            F_MANAGE_ARRAYS_N_FILES_R=$CHK_FD_FL_R
-        ;;
-        "ct") # CreaTe
-            if [ -z "$F_FILE_PATH" ] ; then
 
-                # NOTE: Create the folder "./__FAILSAFE__" if it does not exist.
-                # By Questor
-                f_chk_fd_fl "$FOLDER_PATH" "d"
-            if [ ${CHK_FD_FL_R} -eq 0 ] ; then
-                    mkdir "$FOLDER_PATH"
-            fi
+    if ! command -v python3 > /dev/null 2>&1; then
+        PROBLEMS="$PROBLEMS
+    Python 3 (\"python3\")"
+    else
+        if ! python3 -c "import PIL, numpy" > /dev/null 2>&1; then
+            PROBLEMS="$PROBLEMS
+    The Python modules Pillow and NumPy (\"python-pillow\", \"python-numpy\")"
+        fi
+    fi
 
-            fi
-            f_arrays_n_files "c" "$FILE_PATH" F_RP_TARGET_ARR[@]
-        ;;
-        "rd") # ReaD
-            f_arrays_n_files "r" "$FILE_PATH"
-            F_RP_TARGET_ARR=("${F_ARRAYS_N_FILES_R[@]}")
-        ;;
-        "rm") # ReMove
-            rm -f "$FILE_PATH"
-            if [ -z "$F_FILE_PATH" ] ; then
+    if ! command -v "$REALESRGAN_BIN_S" > /dev/null 2>&1; then
+        PROBLEMS="$PROBLEMS
+    The upscaler \"$REALESRGAN_BIN_S\" (see REALESRGAN_BIN_S in \"config.bash\")"
+    fi
 
-            # NOTE: Remove the "./__FAILSAFE__" directory if it is empty. Hidden
-            # files and folders will not be considered. By Questor
-                f_del_empty_fl "$FOLDER_PATH" 1
+    if [ ${PNG_COMPRESS_LEVEL_S} -ne -1 ] && ! command -v oxipng > /dev/null 2>&1; then
+        PROBLEMS="$PROBLEMS
+    \"oxipng\" (or set PNG_COMPRESS_LEVEL_S=-1 in \"config.bash\")"
+    fi
 
-            fi
-        ;;
-        *)
-            local ERROR_NOW="Invalid option! (f_manage_arrays_n_files)"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        ;;
-    esac
+    local FOLDER=""
+    for FOLDER in "$WORK_FOLDER_S" "$WORK_FOLDER_CSTRIKE_S" "$WORK_FOLDER_MAPS_S"; do
+        if ! ez_i.exists "" "d" "$FOLDER"; then
+            PROBLEMS="$PROBLEMS
+    The folder \"$FOLDER\" (check the paths in \"config.bash\")"
+        fi
+    done
+
+    if ! ez_i.exists "" "f" "$ASSETS_TOOL_S"; then
+        PROBLEMS="$PROBLEMS
+    The asset reader \"$ASSETS_TOOL_S\""
+    fi
+
+    ez_i.progress "o"
+    if [ -n "$PROBLEMS" ]; then
+        f_fail "Some things this run needs are missing:
+$PROBLEMS"
+    fi
+    f_manage_logs " > Requirements checked (ImageMagick: \"$MAGICK_BIN_S\", upscaler: \"$REALESRGAN_BIN_S\")." "o" 1
 }
 
 # < -----------------------------------------
@@ -295,41 +363,276 @@ function f_manage_arrays_n_files(){
 # < --------------------------------------------------------------------------
 
 # > --------------------------------------------------------------------------
-# Check that there is enough disk space.
+# Work out what has to be done.
 # --------------------------------------
 
 # > -----------------------------------------
-# Check that there is enough disk space.
+# Scan the maps and build the model of the whole run.
 
-# [Ref(s).: https://unix.stackexchange.com/a/6014/61742 ,
-# https://devconnected.com/how-to-count-files-in-directory-on-linux/ ,
-# https://stackoverflow.com/a/45591665/3223785 ]
-function f_check_disk_space(){
-    : 'Check that there is enough disk space for the files that will be created.'
+# NOTE: "SCAN_R" holds the id of the json-like object every other function
+# reads the run out of: which maps there are, which textures each of them
+# needs, where the pixels of each distinct image live and what it has to be
+# upscaled by. By Questor
+SCAN_R=""
+function f_scan_assets(){
+    : 'Read every BSP and build the model of the whole run.
 
-    f_div_section
-    f_process_in_progress "a" " > Checking resources..."
-    local BSP_QTTY=$(find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*.bsp" | wc -l)
-    # BSP_QTTY_KB=$((116117*$BSP_QTTY)) # GOLD!
-    local BSP_QTTY_KB=$((180000*$BSP_QTTY))
-    local DF_QTTY_KB=$(df -Pk "$WORK_FOLDER_S" | tail -1 | awk '{print $4}')
-    f_bytes_n_units $BSP_QTTY_KB "KB" "GB"
-    local BSP_QTTY_GB=$F_BYTES_N_UNITS_R
-    f_bytes_n_units $DF_QTTY_KB "KB" "GB"
-    local DF_QTTY_GB=$F_BYTES_N_UNITS_R
+    A map'\''s BSP carries the exact list of the textures that map uses, so
+    nothing here has to guess which WADs matter: only the few texture names a
+    map leaves external are ever looked up in them.
+    '
+
+    ez_i.progress "a" " > Scanning maps..."
+    mkdir -p "$FAILSAFE_DIR_S"
+
+    local BLACK_LIST_ARG=""
+    if ez_i.exists "" "f" "$SCRIPT_DIR_S/black_list.txt"; then
+        BLACK_LIST_ARG=" --black-list \"$SCRIPT_DIR_S/black_list.txt\""
+    fi
+    local TRY_MAX_PX_ARG=""
+    if [ ${TRY_MAX_PX_S} -eq 1 ]; then
+        TRY_MAX_PX_ARG=" --try-max-px"
+    fi
+    local KEEP_ENGINE_ARG=""
+    if [ ${SKIP_ENGINE_TEXTURES_S} -eq 0 ]; then
+        KEEP_ENGINE_ARG=" --keep-engine-textures"
+    fi
+    local WAD_LAST_ARG=""
+    if [ ${WAD_LAST_WINS_S} -eq 1 ]; then
+        WAD_LAST_ARG=" --wad-last-wins"
+    fi
+
+    f_run "python3 \"$ASSETS_TOOL_S\" scan \
+--maps \"$WORK_FOLDER_MAPS_S\" \
+--cstrike \"$WORK_FOLDER_CSTRIKE_S\" \
+--env \"$WORK_FOLDER_ENV_S\" \
+--target-px $TARGET_MAX_PX_S \
+--factors \"$UPSCALE_FACTORS_S\" \
+--hash-length $HASH_LENGTH_S\
+$TRY_MAX_PX_ARG$KEEP_ENGINE_ARG$WAD_LAST_ARG$BLACK_LIST_ARG \
+> \"$SCAN_FILE_S\"" "An error occurred while scanning the maps!"
+
+    ez_i.progress "o"
+    f_manage_logs " > Maps scanned." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Load the scan into the json-like model.
+
+function f_load_scan(){
+    : 'Load the scan file into the json-like object every step reads from.'
+
+    ez_i.progress "a" " > Loading the scan..."
+    if [ -n "$SCAN_R" ]; then
+        json_like.unset_obj SCAN_R
+    fi
+    json_like.from_json SCAN_R < "$SCAN_FILE_S" || {
+        f_fail "The scan file could not be read!
+FILE: $SCAN_FILE_S
+Delete it and run this script again to start a fresh scan."
+    }
+    ez_i.progress "o"
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Read one value out of the model.
+
+# NOTE: A thin wrapper so that a missing path is a script failure with a
+# useful message rather than a silent empty string. By Questor
+F_MODEL_R=""
+function f_model(){
+    : 'Read one value out of the scan model.
+
+    Args:
+        PATH_ITEM... (str): Path to the value, one argument per level.
+
+    Returns:
+        F_MODEL_R (str): The value.
+    '
+
+    F_MODEL_R=""
+    json_like.get F_MODEL_R "$SCAN_R" "$@" 2> /dev/null || {
+        f_fail "The scan model has no \"$*\"!
+This should not happen; please report it with the log below.
+SCAN: $SCAN_FILE_S"
+    }
+}
+
+# NOTE: Same, for the length of an array in the model. By Questor
+F_MODEL_LENGTH_R=0
+function f_model_length(){
+    : 'Read the length of an array in the scan model.
+
+    Args:
+        PATH_ITEM... (str): Path to the array, one argument per level.
+
+    Returns:
+        F_MODEL_LENGTH_R (int): How many elements it has.
+    '
+
+    F_MODEL_LENGTH_R=0
+    json_like.get_length F_MODEL_LENGTH_R "$SCAN_R" "$@" 2> /dev/null || {
+        F_MODEL_LENGTH_R=0
+    }
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Report what the scan found and confirm the disk consumption.
+
+# NOTE: How many bytes a finished pixel costs on disk, give or take. Only
+# used for the estimate shown to the user.
+#
+# 1.48 is MEASURED: a full run over the five map sample produced 320964608
+# pixels in 0.44 GB. The 1 that stood here before was a guess, and it
+# understated the real consumption by nearly half.
+#
+# BASH has no floating point, so the arithmetic goes through "awk", the same
+# way "ez_i.convert_bytes" and the comparison further down already do.
+# By Questor
+BYTES_PER_PIXEL_S=1.48
+
+function f_review_scan(){
+    : 'Report what the scan found, stop on anything missing and have the user
+    confirm the disk consumption.
+    '
+
+    local MAPS=0 IMAGES=0 SKY=0 REFS=0 UNRESOLVED=0 SKY_MISSING=0
+    local BLACKLISTED=0 PIXELS=0
+    f_model "totals" "maps";           MAPS=$F_MODEL_R
+    f_model "totals" "images";         IMAGES=$F_MODEL_R
+    f_model "totals" "sky";            SKY=$F_MODEL_R
+    f_model "totals" "texture_refs";   REFS=$F_MODEL_R
+    f_model "totals" "unresolved";     UNRESOLVED=$F_MODEL_R
+    f_model "totals" "sky_missing";    SKY_MISSING=$F_MODEL_R
+    f_model "totals" "blacklisted";    BLACKLISTED=$F_MODEL_R
+    f_model "totals" "output_pixels";  PIXELS=$F_MODEL_R
+
+    if [ ${MAPS} -eq 0 ]; then
+        f_fail "No maps (*.bsp) were found!
+FOLDER: $WORK_FOLDER_MAPS_S
+Are the paths in \"config.bash\" correct?"
+    fi
+
+    # NOTE: Report every name a map needs and nothing provides, and every
+    # missing skybox side, before deciding whether to stop. By Questor
+    f_report_missing
+
+    # NOTE: Report the texture names more than one of a map's WADs carries,
+    # so the user can check the ones that actually matter. By Questor
+    f_report_ambiguous
+
+    local DISK_KB=""
+    DISK_KB=$(awk '{printf("%.0f\n", ($1 * $2) / 1024)}' \
+        <<< "$PIXELS $BYTES_PER_PIXEL_S")
+    local DISK_GB=""
+    ez_i.convert_bytes DISK_GB "$DISK_KB" "KB" "GB"
+    local FREE_KB=$(df -Pk "$WORK_FOLDER_S" | tail -1 | awk '{print $4}')
+    local FREE_GB=""
+    ez_i.convert_bytes FREE_GB "$FREE_KB" "KB" "GB"
     local DISK_WARNING=""
-    if (( $(echo $BSP_QTTY_GB $DF_QTTY_GB | awk '{if ($1 > $2) print 1;}') )); then
+    if (( $(echo $DISK_GB $FREE_GB | awk '{if ($1 > $2) print 1;}') )); then
         DISK_WARNING=" (!!! DISK SPACE WARNING !!!)"
     fi
-    f_process_in_progress "o"
-    f_div_section
-    f_yes_no "You have $BSP_QTTY maps (*.bsp) which will result in APPROXIMATELY $BSP_QTTY_GB GB on your disk.
-Your free disk space is $DF_QTTY_GB GB$DISK_WARNING.
-Is this OK for you?"
-    if [ ${YES_NO_R} -eq 0 ] ; then
-        f_okay_exit "Canceled by user."
+
+    f_manage_logs " > Scan: $MAPS map(s), $REFS texture reference(s) resolving to \
+$IMAGES distinct image(s) and $SKY distinct \"skyname\" side(s). \
+$BLACKLISTED blacklisted, $UNRESOLVED unresolved, $SKY_MISSING \"skyname\" side(s) missing." "o" 1
+
+    ez_i.divider
+    ez_i.ask_yes_no "" "Your $MAPS map(s) use $REFS textures, which are only $IMAGES DISTINCT
+images (plus $SKY distinct \"skyname\" sides). Each distinct image is upscaled
+once, so that is all the work there is.
+
+This will use APPROXIMATELY $DISK_GB GB on your disk.
+Your free disk space is $FREE_GB GB$DISK_WARNING.
+Is this OK for you?" || ez_i.okay_exit "Canceled by user."
+    f_manage_logs " > Disk consumption accepted (APPROXIMATELY $DISK_GB GB)." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Report anything a map needs and nothing provides.
+
+function f_report_missing(){
+    : 'Log every unresolved texture and every missing "skyname" side, and stop
+    if "STOP_WAD_SKYNAME_MISSING_S" says to.
+    '
+
+    local MAP_COUNT=0 MAP_NAME="" ITEM="" PROBLEMS=0
+    local i=0 j=0
+    f_model_length "map_order"
+    MAP_COUNT=$F_MODEL_LENGTH_R
+    for ((i=0;i<=$((MAP_COUNT-1));i++)); do
+        f_model "map_order" "$i"
+        MAP_NAME=$F_MODEL_R
+
+        f_model_length "maps" "$MAP_NAME" "unresolved"
+        for ((j=0;j<=$((F_MODEL_LENGTH_R-1));j++)); do
+            json_like.get ITEM "$SCAN_R" "maps" "$MAP_NAME" "unresolved" "$j" 2> /dev/null || continue
+            PROBLEMS=1
+            f_manage_logs "A texture a map needs is in no WAD!
+TEXTURE: $ITEM
+MAP: $MAP_NAME" "e"
+        done
+
+        f_model_length "maps" "$MAP_NAME" "sky_missing"
+        for ((j=0;j<=$((F_MODEL_LENGTH_R-1));j++)); do
+            json_like.get ITEM "$SCAN_R" "maps" "$MAP_NAME" "sky_missing" "$j" 2> /dev/null || continue
+            PROBLEMS=1
+            f_model "maps" "$MAP_NAME" "skyname"
+            f_manage_logs "A \"skyname\" file (TGA) is missing!
+TGA: $WORK_FOLDER_ENV_S/${F_MODEL_R}${ITEM}.tga (use a case-insensitive path)
+MAP: $MAP_NAME" "e"
+        done
+    done
+
+    if [ ${PROBLEMS} -eq 1 ] && [ ${STOP_WAD_SKYNAME_MISSING_S} -eq 1 ]; then
+        f_fail "There is/are texture(s) and/or \"skyname\" file(s) that no WAD and
+no \"gfx/env\" provides. The maps that need them would come out incomplete.
+
+Set STOP_WAD_SKYNAME_MISSING_S=0 in \"config.bash\" to process everything
+else anyway and leave these out.
+
+ERROR_LOG: $ERROR_LOG_PATH_N_NAME"
     fi
-    f_manage_logs " > Disk consumption accepted (APPROXIMATELY $BSP_QTTY_GB GB)." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Report texture names carried by more than one of a map's WADs.
+
+function f_report_ambiguous(){
+    : 'Log every texture name more than one of a map'\''s WADs carries.
+
+    Which of them the engine actually uses is not something this script can
+    know for certain, so each one is reported rather than silently decided.
+    See WAD_LAST_WINS_S in "config.bash".
+    '
+
+    local COUNT=0 MAP_NAME="" TEXTURE="" USED=""
+    local i=0
+    f_model_length "ambiguous"
+    COUNT=$F_MODEL_LENGTH_R
+    if [ ${COUNT} -eq 0 ]; then
+        return
+    fi
+    for ((i=0;i<=$((COUNT-1));i++)); do
+        json_like.get MAP_NAME "$SCAN_R" "ambiguous" "$i" "map" 2> /dev/null || continue
+        json_like.get TEXTURE "$SCAN_R" "ambiguous" "$i" "texture" 2> /dev/null || continue
+        json_like.get USED "$SCAN_R" "ambiguous" "$i" "used" 2> /dev/null || continue
+        f_manage_logs " > Texture name carried by more than one WAD: \"$TEXTURE\" \
+(map \"$MAP_NAME\"), taken from \"$USED\" (WAD_LAST_WINS_S=$WAD_LAST_WINS_S)." "o"
+    done
+    f_manage_logs " > $COUNT texture name(s) are carried by more than one WAD; \
+see the output log." "o" 1
 }
 
 # < -----------------------------------------
@@ -337,1399 +640,558 @@ Is this OK for you?"
 # < --------------------------------------------------------------------------
 
 # > --------------------------------------------------------------------------
-# Back up the "detail", "env" folders and the "*_detail.txt" files.
+# Back up what the run modifies.
 # --------------------------------------
 
 # > -----------------------------------------
-# Back up the "detail", "env" folders and the "*_detail.txt" files.
+# Back up what the run modifies.
 
 # [Ref(s).: https://unix.stackexchange.com/a/154819/61742 ,
 # https://stackoverflow.com/a/5241677/3223785 ,
 # https://unix.stackexchange.com/a/714059/61742 ,
 # https://stackoverflow.com/a/53228677/3223785 ]
-declare -a F_BACKUP_FILES_N_FOLDERS_R=()
+declare -a BACKUPS_R=()
 function f_backup_files_n_folders(){
-    : 'Back up the "detail", "env" folders, (\"maps\" folder) \"*_detail.txt\" files and (\"cstrike\" folder) \"*.wad\" files.'
+    : 'Back up the "detail" and "env" folders and the "*_detail.txt" files.
 
-    # NOTE: "detail" folder backup. By Questor
-    f_div_section
-    f_process_in_progress "a" " > Backing up \"detail\" folder..."
-    f_ez_backup "$WORK_FOLDER_DETAIL_S"
-    mkdir "$WORK_FOLDER_DETAIL_S"
-    cd "$F_EZ_BACKUP_PATH_R"
-    f_get_stderr_stdout "tar -czf \"$F_EZ_BACKUP_NAME_R.tar.gz\" \"$F_EZ_BACKUP_NAME_R\""
-    if [ -n "$F_EZ_BACKUP_NAME_R" ] ; then
-        rm -rf "$F_EZ_BACKUP_NAME_R"
-    fi
-    cd "$SCRIPT_DIR_S"
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        f_process_in_progress "o"
-        local ERROR_NOW="An error occurred while compressing the backup folder!
-ERROR: \"$F_GET_STDERR_R\"
-FOLDER: \"$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    F_BACKUP_FILES_N_FOLDERS_R+=("$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R.tar.gz")
-    f_process_in_progress "o"
-    f_manage_logs " > Backup of \"detail\" folder done." "o" 1
-
-    # NOTE: "env" folder backup. By Questor
-    f_div_section
-    f_process_in_progress "a" " > Backing up \"env\" folder..."
-    f_ez_backup "$WORK_FOLDER_ENV_S" 0 1
-    cd "$F_EZ_BACKUP_PATH_R"
-    f_get_stderr_stdout "tar -czf \"$F_EZ_BACKUP_NAME_R.tar.gz\" --transform \"s/^\.\/env/$F_EZ_BACKUP_NAME_R/\" \"./env\""
-    cd "$SCRIPT_DIR_S"
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        f_process_in_progress "o"
-        local ERROR_NOW="An error occurred while compressing the backup folder!
-ERROR: \"$F_GET_STDERR_R\"
-FOLDER: \"$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    F_BACKUP_FILES_N_FOLDERS_R+=("$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R.tar.gz")
-    f_process_in_progress "o"
-    f_manage_logs " > Backup of \"env\" folder done." "o" 1
-
-    # NOTE: ("maps" folder) "*_detail.txt" files backup. By Questor
-    f_div_section
-    f_process_in_progress "a" " > Backing up (\"maps\" folder) \"*_detail.txt\" files..."
-    f_ez_backup "${WORK_FOLDER_MAPS_S}_detail" 0 1
-    mkdir "$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R"
-    find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*_detail.txt" -exec cp -t "$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R/" {} +
-    cd "$F_EZ_BACKUP_PATH_R"
-    f_get_stderr_stdout "tar -czf \"$F_EZ_BACKUP_NAME_R.tar.gz\" \"$F_EZ_BACKUP_NAME_R\""
-    if [ -n "$F_EZ_BACKUP_NAME_R" ] ; then
-        rm -rf "$F_EZ_BACKUP_NAME_R"
-    fi
-    cd "$SCRIPT_DIR_S"
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        f_process_in_progress "o"
-        local ERROR_NOW="An error occurred while compressing the backup folder!
-ERROR: \"$F_GET_STDERR_R\"
-FOLDER: \"$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    else
-        rm -rf "$F_EZ_BACKUP_NAME_R"
-    fi
-    F_BACKUP_FILES_N_FOLDERS_R+=("$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R.tar.gz")
-    f_process_in_progress "o"
-    f_manage_logs " > Backup of (\"maps\" folder) \"*_detail.txt\" files done." "o" 1
-
-    # NOTE: ("cstrike" folder) "*.wad" files backup. By Questor
-    f_div_section
-    f_process_in_progress "a" " > Backing up (\"cstrike\" folder) \"*.wad\" files..."
-    f_ez_backup "${WORK_FOLDER_CSTRIKE_S}_wad" 0 1
-    mkdir "$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R"
-    find "$WORK_FOLDER_CSTRIKE_S" -maxdepth 1 -type f -iname "*.wad" -exec cp -t "$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R/" {} +
-    cd "$F_EZ_BACKUP_PATH_R"
-    f_get_stderr_stdout "tar -czf \"$F_EZ_BACKUP_NAME_R.tar.gz\" \"$F_EZ_BACKUP_NAME_R\""
-    if [ -n "$F_EZ_BACKUP_NAME_R" ] ; then
-        rm -rf "$F_EZ_BACKUP_NAME_R"
-    fi
-    cd "$SCRIPT_DIR_S"
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        f_process_in_progress "o"
-        local ERROR_NOW="An error occurred while compressing the backup folder!
-ERROR: \"$F_GET_STDERR_R\"
-FOLDER: \"$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    else
-        rm -rf "$F_EZ_BACKUP_NAME_R"
-    fi
-    F_BACKUP_FILES_N_FOLDERS_R+=("$F_EZ_BACKUP_PATH_R/$F_EZ_BACKUP_NAME_R.tar.gz")
-    f_process_in_progress "o"
-    f_manage_logs " > Backup of (\"cstrike\" folder) \"*.wad\" files done." "o" 1
-
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Defining some BSP entities and other information.
-# --------------------------------------
-
-# > -----------------------------------------
-# Defining "skynames" images to be processed and calculate image upscale factor.
-
-# NOTE: Consumed by the functions "f_define_skyname" and "f_add_skynames_to_extras_txt".
-# By Questor
-declare -a SKY_SIDES=("rt" "bk" "lf" "ft" "up" "dn")
-
-SKY_NAME_STATUS_R=""
-SKY_NAME_FILE_MISSING_R=0
-declare -a F_SKYNAME_N_UPSCL_FACT_R=()
-function f_define_skyname(){
-    : 'Defining "skynames" images to be processed and calculate image upscale factor.
-
-    Args:
-        ENT_FILE (str): Input entity file;
-        BSP_NAME (str): BSP file name;
-        BSP_FILE (str): BSP file path and name.
+    These are the only things the run touches. WAD files are only ever read,
+    so unlike the old pipeline - which deleted the ones it thought unused -
+    there is nothing to back up for them.
     '
 
-    local ENT_FILE=$1
-    local BSP_NAME=$2
-    local BSP_FILE=$3
-    local SKY_NAME_LINE=""
-    local SKY_NAME=""
-    local SKY_ITEM=""
-    f_process_in_progress "a" " > Defining \"skyname\"..."
-    SKY_NAME_LINE=$(grep -m 1 -a "\"skyname\" \"" "$ENT_FILE")
-    SKY_NAME_STATUS_R="BSP file does not have \"skyname\""
-    if [ -n "$SKY_NAME_LINE" ] ; then
-        f_master_splitter "$SKY_NAME_LINE" "\""
-        SKY_NAME="${F_MASTER_SPLITTER_R[3]}"
-        F_SKYNAME_N_UPSCL_FACT_R+=("$BSP_NAME")
-        SKY_NAME_STATUS_R="BSP file \"skyname\" components defined"
-        for ((j=0;j<=5;j++)); do
-            SKY_ITEM=$(find "$WORK_FOLDER_ENV_S" -maxdepth 1 -type f -iname "${SKY_NAME}${SKY_SIDES[$j]}.tga" -print -quit)
-            if [ -z "$SKY_ITEM" ] ; then
-                SKY_NAME_FILE_MISSING_R=1
-                SKY_NAME_STATUS_R="\"Skyname\" file(s) required by the BSP file missing"
-                f_manage_logs "A \"skyname\" file (TGA) is missing!
-TGA: $WORK_FOLDER_ENV_S/${SKY_NAME}${SKY_SIDES[$j]}.tga (use case-insensitive path)
-BSP: $BSP_FILE" "e"
-            elif [ ${j} -eq 0 ] ; then
-                f_upscl_fact_n_resize_calc "$SKY_ITEM"
-
-                # NOTE: The "skynames" only have the sizes (X and Y) 512 px or 256
-                # px. Therefore, we will always have values for "UPSCL_FACT" (return
-                # in "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}") that generate images of
-                # exactly 1024 px (X and Y) in size. The "TRY_MAX_PX_S" is unnecessary
-                # in this scenario. By Questor
-                F_SKYNAME_N_UPSCL_FACT_R+=(${F_UPSCL_FACT_N_RESIZE_CALC_R[0]})
-
-            fi
-            F_SKYNAME_N_UPSCL_FACT_R+=("$SKY_ITEM")
-        done
-    fi
-    f_process_in_progress "o"
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Defining WAD file(s) in use by a BSP file.
-
-# [Ref(s).: https://stackoverflow.com/a/3686056/3223785 ]
-WADS_STATUS_R=""
-declare -a WADS_IN_USE_R=()
-function f_define_wads(){
-    : 'Defining WAD file(s) in use by a BSP file.
-
-    Args:
-        ENT_FILE (str): Input entity file.
-    '
-
-    # IMPORTANT: Not all WAD files listed in a BSP will be required for it. But with
-    # this strategy we eliminate those that are not used in any BSP, avoiding the
-    # processing (upscaling) of unnecessary textures. The upscaling process is critical
-    # and can be very, very time consuming. Automatic Detail Texture Generator 2007
-    # (DTG07) is limited to extracting images from all WADs in the "cstrike" folder
-    # without checking that they are consumed by some BSP. We couldn't figure out
-    # a strategy to effectively define which WAD files are consumed by each BSP.
-    # By Questor
-
-    local ENT_FILE=$1
-    local WAD_LINE=""
-    declare -a WAD_ITEMS=()
-    local WAD_ITEM=""
-    local LENGTH_A=0
-    local LENGTH_B=0
-    local ADD_WAD_ITEM=0
-    local i=0
-    local j=0
-    f_process_in_progress "a" " > Defining BSP file WAD file(s)..."
-    WAD_LINE=$(grep -m 1 -a "\"wad\" \"" "$ENT_FILE")
-    WADS_STATUS_R="BSP file does not have WAD file(s)"
-    if [ -n "$WAD_LINE" ] ; then
-        f_master_splitter "$WAD_LINE" "\""
-        f_master_splitter "$WAD_LINE" "\""
-        f_master_splitter "${F_MASTER_SPLITTER_R[3]}" ";"
-        WAD_ITEMS=("${F_MASTER_SPLITTER_R[@]}")
-        LENGTH_A=${#WAD_ITEMS[*]}
-
-        # NOTE: When the "wad" attribute is empty, the split will return only one
-        # item and it will be empty. When not, it will always have a "length" greater
-        # than 2 and the last item will be empty. By Questor
-        if [ $LENGTH_A -gt 1 ] ; then
-            WADS_STATUS_R="BSP file have unnecessary WAD file(s)"
-            for ((i=0;i<=$(($LENGTH_A-2));i++)); do
-            # NOTE: The last item is always empty. Hence the value "-2". By Questor
-
-                if [[ "${WAD_ITEMS[$i]}" == *"/"* ]] ; then
-                # NOTE: The reason for this conditional is because there was a case
-                # using slash and not backslash in our tests. Just in case we decided
-                # to add this variant. By Questor
-
-                    f_master_splitter "${WAD_ITEMS[$i]}" "/"
-                else
-                    f_master_splitter "${WAD_ITEMS[$i]}" "\\"
-                fi
-
-                WAD_ITEM=$(find "$WORK_FOLDER_CSTRIKE_S" -maxdepth 1 -type f -iname "${F_MASTER_SPLITTER_R[-1]}" -print -quit 2> /dev/null)
-                if [ -n "$WAD_ITEM" ] ; then
-                    WADS_STATUS_R="BSP file required WAD file(s) defined"
-                    ADD_WAD_ITEM=1
-                    LENGTH_B=${#WADS_IN_USE_R[*]}
-                    for ((j=0;j<=$(($LENGTH_B-1));j++)); do
-                    # NOTE: Avoid repeated items in the array. BASH does not have
-                    # native functionality for this. By Questor
-
-                        if [ "${WADS_IN_USE_R[$j]}" == "$WAD_ITEM" ] ; then
-                            ADD_WAD_ITEM=0
-                            break
-                        fi
-                    done
-                    if [ ${ADD_WAD_ITEM} -eq 1 ] ; then
-                        WADS_IN_USE_R+=("$WAD_ITEM")
-                    fi
-                fi
-            done
-        fi
-    fi
-    f_process_in_progress "o"
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Exporting BSP entities and it triggers other methods to process that data.
-
-# [Ref(s).: https://stackoverflow.com/q/2664740/3223785 ,
-# https://stackoverflow.com/a/36341390/3223785 ,
-# https://stackoverflow.com/a/16623897/3223785 ,
-# https://unix.stackexchange.com/a/333133/61742 ,
-# https://stackoverflow.com/a/23512981/3223785 ,
-# https://stackoverflow.com/a/14093511/3223785 ,
-# https://unix.stackexchange.com/a/62883/61742 ]
-function f_export_bsp_entities(){
-    : 'Exporting BSP entities and it triggers other methods to process that data.'
-
-    f_process_in_progress "a" " > Listing BSP files..."
-    declare -a BSP_FILES=()
-    while IFS= read -r -d '' INPUT_FILE; do
-        BSP_FILES+=("$INPUT_FILE")
-    done < <(find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*.bsp" -print0)
-    f_process_in_progress "o"
-    local BSP_NAME=""
-    local ENT_FILE=""
-    local LENGTH=${#BSP_FILES[*]}
-    f_long_task_stats "s" $LENGTH
-    local i=0
-    local j=0
-    for ((i=0;i<=$(($LENGTH-1));i++)); do
-        f_long_task_stats "a"
-        f_process_in_progress "a" " > Exporting BSP file entities..."
-        f_get_stderr_stdout "$RIPENT_CMD_S"
-
-        # NOTE: The "[...]Gtk-WARNING **: 18:46:37.008: Theme parsing error: gtk.css:[...]"
-        # warning returned by wine was generating a false error detection as the
-        # application is not crashing. By Questor
-        if ( [[ "$F_GET_STDERR_R" != "" ]] && [[ "$F_GET_STDERR_R" != *"Theme parsing error"* ]] ) || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            f_process_in_progress "o"
-            local ERROR_NOW="An error occurred while exporting the BSP entities!
-ERROR: $F_GET_STDERR_R
-FILE: ${BSP_FILES[$i]}"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-
-        BSP_NAME=$(basename "${BSP_FILES[$i]}" ".${BSP_FILES[$i]##*.}")
-        ENT_FILE="$WORK_FOLDER_MAPS_S/$BSP_NAME.ent"
-        f_process_in_progress "o"
-        f_define_skyname "$ENT_FILE" "$BSP_NAME" "${BSP_FILES[$i]}"
-        if [ ${SKY_NAME_FILE_MISSING_R} -eq 0 ] ; then
-            f_define_wads "$ENT_FILE" "${BSP_FILES[$i]}"
-        else
-            # NOTE: In case of missing skyname(s), execution will stop after checking
-            # these anyway. By Questor
-
-            WADS_STATUS_R="Defining BSP file WAD file(s) skipped"
-        fi
-        rm -f "$ENT_FILE"
-        f_long_task_stats "o"
-        f_manage_logs " > $SKY_NAME_STATUS_R/$WADS_STATUS_R: ${BSP_FILES[$i]}
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-    if [ ${SKY_NAME_FILE_MISSING_R} -eq 1 ] ; then
-        local ERROR_NOW="There are missing \"skyname\" file(s). See the log file below for what they are.
-ERROR_LOG: $ERROR_LOG_PATH_N_NAME"
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Remove unused WAD files.
-# --------------------------------------
-
-# > -----------------------------------------
-# Remove unused WAD files.
-
-function f_remove_unused_wads(){
-    : 'Remove unused WAD files.'
-
-    f_process_in_progress "a" " > Listing WAD files..."
-    declare -a WAD_FILES=()
-    while IFS= read -r -d '' INPUT_FILE; do
-        WAD_FILES+=("$INPUT_FILE")
-    done < <(find "$WORK_FOLDER_CSTRIKE_S" -maxdepth 1 -type f -iname "*.wad" -print0)
-    f_process_in_progress "o"
-
-    local RM_WAD_ITEM=0
-    local WADS_IN_USE_ITEM=""
-    local ACTION_NOW=""
-    local LENGTH_A=${#WAD_FILES[*]}
-    local LENGTH_B=${#WADS_IN_USE_R[*]}
-    f_long_task_stats "s" $LENGTH_A
-    local i=0
-    local j=0
-    for ((i=0;i<=$(($LENGTH_A-1));i++)); do
-        f_long_task_stats "a"
-        RM_WAD_ITEM=1
-        for ((j=0;j<=$(($LENGTH_B-1));j++)); do
-            if [ "${WADS_IN_USE_R[$j]}" == "${WAD_FILES[$i]}" ] ; then
-                RM_WAD_ITEM=0
-                break
-            fi
-        done
-        ACTION_NOW="WAD file kept"
-        if [ ${RM_WAD_ITEM} -eq 1 ] ; then
-            rm -f "${WAD_FILES[$i]}"
-            ACTION_NOW="WAD file removed"
-        fi
-        f_long_task_stats "o"
-        f_manage_logs " > $ACTION_NOW: ${WAD_FILES[$i]}
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Run Detail Texture Generator 2007 (DTG07) program to extract maps textures.
-# --------------------------------------
-
-# > -----------------------------------------
-# Run Detail Texture Generator 2007 (DTG07) program to extract maps textures.
-
-function f_run_det_texture_gen_07(){
-    : 'Run Detail Texture Generator 2007 (DTG07) program to extract maps textures.
-
-    Furthermore, it will modify the behavior of DTG07, forcing an error to occur.
-    In this way it is possible to extract all BMPs related to all maps without having
-    them converted to TGA in grayscale.
-    '
-
-    rm -rf "$WINE_DRIVE_C_S/__CS16__"
-    mkdir "$WINE_DRIVE_C_S/__CS16__"
-    f_get_stderr_stdout "ln -s \"$WORK_FOLDER_S\" \"$WINE_DRIVE_C_S/__CS16__\""
-
-    # NOTE: To avoid problem with remaining symbolic link in case of error. By Questor
-    f_ez_trap_add "rm -rf \"$WINE_DRIVE_C_S/__CS16__\"" SIGINT SIGTERM ERR EXIT
-
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        local ERROR_NOW="An error occurred while creating the symbolic link!
-ERROR: \"$F_GET_STDERR_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    rm -f "$WORK_FOLDER_CSTRIKE_S/!!!!!!!!!!!!.wad"
-    echo -n "SYNDROME" > "$WORK_FOLDER_CSTRIKE_S/!!!!!!!!!!!!.wad"
-    rm -rf "$WORK_FOLDER_DETAIL_S/!!!!!!!!!!!!"
-    mkdir -p "$WORK_FOLDER_DETAIL_S/!!!!!!!!!!!!/root"
-    echo -n "SYNDROME" > "$WORK_FOLDER_DETAIL_S/!!!!!!!!!!!!/root/!!!!!!!!!!!!.bmp"
-    f_enter_to_cont "Run Detail Texture Generator 2007 (DTG07) program to extract
-maps textures.
-
-INSTRUCTIONS:
- I - Select CS 1.6 main folder and click \"MAKE DETAIL TEXTURES\";
-  a - The main CS 1.6 folder will be in the folder \"__CS16__\";
-  b - This folder is the one containing the main CS 1.6 executable (\"hl.exe\", for
-example).
- II - \"Syndrome\" files was created in the \"cstrike\" and \"detail\" folders.
-This files will CAUSE A PURPOSEFUL ERROR in the execution of DTG07;
-  a - Everything will be finished when DTG07 displays an error dialog (\"Stream read
-error\") and something like this in the main window...
-\"\"\"
-[...]
-Counting .BMP files that will be converted to .TGA
-Making details from extracted textures \".BMP\" and converting to \".TGA\"
-Making details from cs wads textures
-Converting: \"!!!!!!!!!!!!\"
-\"\"\";
- b - After \"finishing\" the execution of DTG07, close it so that this script execution
-continues.
- III - DO NOT CLOSE THIS TERMINAL!"
-    f_get_stderr_stdout "$DTG07_CMD_S"
-    if [ "$F_GET_STDERR_R" != "" ] && [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        rm -f "$WORK_FOLDER_CSTRIKE_S/!!!!!!!!!!!!.wad"
-        rm -rf "$WORK_FOLDER_DETAIL_S/!!!!!!!!!!!!"
-        rm -rf "$WINE_DRIVE_C_S/__CS16__"
-        local ERROR_NOW="An error occurred while running Automatic Detail Texture Generator 2007 (DTG07)!
-ERROR: \"$F_GET_STDERR_R\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    rm -f "$WORK_FOLDER_CSTRIKE_S/!!!!!!!!!!!!.wad"
-    rm -rf "$WORK_FOLDER_DETAIL_S/!!!!!!!!!!!!"
-    rm -rf "$WINE_DRIVE_C_S/__CS16__"
-    f_div_section
-    f_yes_no "Did everything go as expected when running Automatic Detail Texture Generator 2007 (DTG07)?"
-    if [ ${YES_NO_R} -eq 0 ] ; then
-        local ERROR_NOW="An error occurred while running Automatic Detail Texture Generator 2007 (DTG07)!"
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    f_manage_logs " > Textures extracted with Automatic Detail Texture Generator 2007 (DTG07)." "o" 1
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Calculate image upscale factor.
-# --------------------------------------
-
-# > -----------------------------------------
-# Calculate image upscale factor.
-
-# [Ref(s).: https://stackoverflow.com/a/12723330/3223785 , 
-# https://stackoverflow.com/a/31087503/3223785 , 
-# https://stackoverflow.com/a/68878999/3223785 , 
-# https://stackoverflow.com/a/7553744/3223785 ]
-declare -a VALID_UPSCALE_VALS=()
-if [ "$UPSCALER_IN_USE_S" == "w" ] ; then
-    VALID_UPSCALE_VALS=(1 2 4 8 16 32)
-elif [ "$UPSCALER_IN_USE_S" == "r" ] ; then
-    VALID_UPSCALE_VALS=(1 2 4)
-fi
-declare -a F_UPSCL_FACT_N_RESIZE_CALC_R=()
-function f_upscl_fact_n_resize_calc(){
-    : 'Calculate image upscale factora and resize (if that'\''s the case).
-
-    Args:
-        F_IMAGE_FILE (str): Image to analysis.
-
-    Returns:
-        F_UPSCL_FACT_N_RESIZE_CALC_R (int): Upscale factor and resize (if that'\''s the case, otherwise "").
-    '
-
-    local F_IMAGE_FILE=$1
-    F_UPSCL_FACT_N_RESIZE_CALC_R=()
-    declare -a IMG_W_H=()
-    local HI_VALUE=0
-    local LO_VALUE=0
-    local A_VALUE=0
-    local B_VALUE=0
-    local F_UPSCL_CALC_NOW=""
-    local HI_LO_TO_X_Y=""
-    local MAX_PX_ADJ_FACTOR=""
-    local LENGTH=${#VALID_UPSCALE_VALS[*]}
-    local i=0
-    f_get_stderr_stdout "identify -format \"%w %h\" \"$F_IMAGE_FILE\""
-    if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        local ERROR_NOW="An error occurred while calculating image scaling!
-ERROR: \"$F_GET_STDERR_R\"
-FILE: \"$F_IMAGE_FILE\""
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    IMG_W_H=($F_GET_STDOUT_R)
-    if (( IMG_W_H[0] >= IMG_W_H[1] )) ; then
-        HI_VALUE=${IMG_W_H[0]}
-        LO_VALUE=${IMG_W_H[1]}
-
-        # s - same
-        HI_LO_TO_X_Y="s"
-    else
-        HI_VALUE=${IMG_W_H[1]}
-        LO_VALUE=${IMG_W_H[0]}
-
-        # r - reverse
-        HI_LO_TO_X_Y="r"
-    fi
-
-    # NOTE: All images that will be processed are multiples of 8 in px. The largest
-    # texture measurement does not exceed 512 px, so "F_UPSCL_CALC_NOW" will never
-    # be less than 2. By Questor
-    F_UPSCL_CALC_NOW=$(bc -l <<< "1024/$HI_VALUE")
-    if (( $(bc -l <<< "$F_UPSCL_CALC_NOW >= $MAX_UPSCL_FACT_S") )); then
-        F_UPSCL_FACT_N_RESIZE_CALC_R+=("$MAX_UPSCL_FACT_S")
-        F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
-    else
-        for ((i=0;i<=$(($LENGTH-1));i++)); do
-            if (( $(bc -l <<< "${VALID_UPSCALE_VALS[$i]} == $F_UPSCL_CALC_NOW") )); then
-
-                # NOTE: Strategy to remove unsupported floating point. By Questor
-                F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$i]}")
-                F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
-
-                break
-            elif (( $(bc -l <<< "${VALID_UPSCALE_VALS[$i]} > $F_UPSCL_CALC_NOW") )); then
-                if [ ${TRY_MAX_PX_S} -eq 0 ] ; then
-                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$((i - 1))]}")
-                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("")
-                else
-                    F_UPSCL_FACT_N_RESIZE_CALC_R+=("${VALID_UPSCALE_VALS[$i]}")
-                    MAX_PX_ADJ_FACTOR=$(bc -l <<< "1024/($HI_VALUE*$F_UPSCL_CALC_NOW)")
-                    A_VALUE=1024
-                    B_VALUE=$(bc -l <<< "$LO_VALUE*$F_UPSCL_CALC_NOW*$MAX_PX_ADJ_FACTOR")
-
-                    # NOTE: Round value to the nearest integer. By Questor
-                    B_VALUE=$(bc <<< "($B_VALUE+0.5)/1")
-
-                    # NOTE: Ignore Aspect Ratio ('!' flag) If you want you can force
-                    # "-resize" to ignore the aspect ratio and distort the image
-                    # so it always generates an image exactly the size specified.
-                    # This is done by adding the character '!' to the size. Unfortunately
-                    # this character is also sometimes used for special purposes
-                    # by various UNIX command line shells. So you may have to escape
-                    # the character somehow to preserve it. By Questor
-                    if [ "$HI_LO_TO_X_Y" == "s" ] ; then
-                        F_UPSCL_FACT_N_RESIZE_CALC_R+=("${A_VALUE}x${B_VALUE}\!")
-                    elif [ "$HI_LO_TO_X_Y" == "r" ] ; then
-                        F_UPSCL_FACT_N_RESIZE_CALC_R+=("${B_VALUE}x${A_VALUE}\!")
-            fi
-                fi
-                break
-            fi
-        done
-    fi
-
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Listing textures images to be processed and calculate image upscale factor.
-# --------------------------------------
-
-# > -----------------------------------------
-# Listing textures images to be processed and calculate image upscale factor.
-
-# [Ref(s).:  https://superuser.com/a/370982/195840 ,
-# https://stackoverflow.com/a/18093887/3223785 ,
-# https://serverfault.com/a/739037/276753 , 
-# https://www.cyberciti.biz/faq/unix-linux-bash-script-check-if-variable-is-empty ]
-
-declare -a F_TEXTURE_N_UPSCL_FACT_R=()
-function f_list_textures(){
-    : 'Listing textures images to be processed and calculate image upscale factor.'
-
-    declare -a F_BMP_IMAGES_R=()
-    local INPUT_FOLDER=""
-    local INPUT_FILE=""
-
-    f_process_in_progress "a" " > Listing textures..."
-    while IFS= read -r -d '' INPUT_FOLDER; do
-        while IFS= read -r -d '' INPUT_FILE; do
-            F_BMP_IMAGES_R+=("$INPUT_FILE")
-        done < <(find "$INPUT_FOLDER/root" -maxdepth 1 -type f -iname "*.bmp" -print0)
-    done < <(find "$WORK_FOLDER_DETAIL_S" -maxdepth 1 -type d -exec test -e '{}'/root \; -print0)
-    # NOTE: We need to use process substitution to prevent external variables from
-    # losing their scope. By Questor
-    # [Ref(s).: https://stackoverflow.com/a/7612420/3223785 ]
-
-    f_process_in_progress "o"
-    f_manage_logs " > Textures listed." "o" 1
-
-    local LENGTH=${#F_BMP_IMAGES_R[*]}
-    if [ ${LENGTH} -lt 1 ] ; then
-        local ERROR_NOW="No \"root\" folder (BMPs folder) found!
-Did you run Automatic Detail Texture Generator 2007 (DTG07) as expected?
-Are the settings in the \"config.bash\" file correct?"
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    f_long_task_stats "s" $LENGTH 1 0
-    local i=0
-    for ((i=0;i<=$(($LENGTH-1));i++)); do
-        f_long_task_stats "a"
-        f_upscl_fact_n_resize_calc "${F_BMP_IMAGES_R[$i]}"
-        F_TEXTURE_N_UPSCL_FACT_R+=("${F_BMP_IMAGES_R[$i]}")
-        F_TEXTURE_N_UPSCL_FACT_R+=(${F_UPSCL_FACT_N_RESIZE_CALC_R[0]})
-        F_TEXTURE_N_UPSCL_FACT_R+=("${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}")
-        f_long_task_stats "o"
-        f_manage_logs " > Upscaling factor calculated: ${F_BMP_IMAGES_R[$i]}
-UPSCALING FACTOR: ${F_UPSCL_FACT_N_RESIZE_CALC_R[0]}
-RESIZE: "$([ -z "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}" ] && echo '<UNNECESSARY>' || echo "${F_UPSCL_FACT_N_RESIZE_CALC_R[1]}")"
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Convert TGA "skyname" to PNG.
-# --------------------------------------
-
-# > -----------------------------------------
-# Convert TGA "skyname" to PNG.
-
-function f_conv_skyname_tga_to_png(){
-    : 'Convert TGA "skyname" to PNG.'
-
-    local PNG_DIR=""
-    local OUTPUT_FILE=""
-    local LENGTH_A=${#F_SKYNAME_N_UPSCL_FACT_R[*]}
-    local LENGTH_B=$(($LENGTH_A-(($LENGTH_A/8)*2)))
-    f_long_task_stats "s" $LENGTH_B
-    local i=0
-    local j=0
-    for ((i=0;i<=$(($LENGTH_A-1));i+=8)); do
-        for ((j=$(($i+2));j<=$(($i+7));j++)); do
-            f_long_task_stats "a"
-            if [ -f "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ] ; then
-            # NOTE: Some maps share the same "skyname". As these files are all validated
-            # for their existence in a previous step, so if the file is not present,
-            # it is because it has already been converted. By Questor
-
-                if [ -z "$PNG_DIR" ] ; then
-                    PNG_DIR="$(dirname "${F_SKYNAME_N_UPSCL_FACT_R[$j]}")/_PNG"
-                    mkdir -p "$PNG_DIR"
-                fi
-                OUTPUT_FILE="$PNG_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-
-                # NOTE: For some reason "convert" (ImageMagick) inverts the image when
-                # converting TGAs. By Questor
-                f_get_stderr_stdout "convert \"${F_SKYNAME_N_UPSCL_FACT_R[$j]}\" -flip \"$OUTPUT_FILE\""
-
-                if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-                    local ERROR_NOW="An error occurred while converting the image to PNG (\"skyname\")!
-ERROR: \"$F_GET_STDERR_R\"
-FILE: \"${F_SKYNAME_N_UPSCL_FACT_R[$j]}\""
-                    f_manage_logs "$ERROR_NOW" "e"
-                    f_error_exit "$ERROR_NOW"
-                fi
-                rm -f "${F_SKYNAME_N_UPSCL_FACT_R[$j]}"
-                f_long_task_stats "o"
-            else
-                f_long_task_stats "k"
-            fi
-            f_manage_logs " > Converted to PNG (\"skyname\"): ${F_SKYNAME_N_UPSCL_FACT_R[$j]}
-$F_LONG_TASK_STATS_R" "o" 1
-        done
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Convert texture BMP to PNG.
-# --------------------------------------
-
-# > -----------------------------------------
-# Convert texture BMP to PNG.
-
-# [Ref(s).: https://stackoverflow.com/a/73428638/3223785
-# https://stackoverflow.com/a/73428638/3223785 ,
-# https://legacy.imagemagick.org/discourse-server/viewtopic.php?p=41925#p41925 ,
-# https://imagemagick.org/script/command-line-options.php ,
-# https://legacy.imagemagick.org/discourse-server/viewtopic.php?p=65754&sid=7cfdfe8f5d3bd65e9da0b40f78e234d6#p65754 ]
-function f_conv_texture_bmp_to_png(){
-    : 'Convert texture BMP to PNG.'
-
-    local PNG_DIR=""
-    local OUTPUT_FILE=""
-    local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    f_long_task_stats "s" $LENGTH 3 0
-    local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
-        f_long_task_stats "a"
-        PNG_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_PNG"
-        OUTPUT_FILE="$PNG_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-        mkdir -p "$PNG_DIR"
-
-        # f_get_stderr_stdout "convert \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\" -transparent \"#0000ff\" -alpha Associate \"$OUTPUT_FILE\""
-
-        # NOTES:
-        # I - We changed the image's blue - the engine's default image transparency
-        # - to the effective PNG format transparency (alpha channel).
-        # II - We use "-fuzz n%" so that the transparency reaches colors that are
-        # not exactly "#0000ff" since some textures don't use this exact value for
-        # transparency.
-        # By Questor
-        f_get_stderr_stdout "convert \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\" -fuzz 2% -transparent \"#0000ff\" -alpha Associate \"$OUTPUT_FILE\""
-
-        if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            local ERROR_NOW="An error occurred while converting the image to PNG (texture)!
-ERROR: \"$F_GET_STDERR_R\"
-FILE: \"${F_TEXTURE_N_UPSCL_FACT_R[$i]}\""
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-        rm -f "${F_TEXTURE_N_UPSCL_FACT_R[$i]}"
-        f_long_task_stats "o"
-        f_manage_logs " > Converted to PNG (texture): ${F_TEXTURE_N_UPSCL_FACT_R[$i]}
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Adjust details ("*_detail.txt") files.
-# --------------------------------------
-
-# > -----------------------------------------
-# Removes textures known to cause map problems.
-
-declare -a TEXTURES_BLACK_LIST=()
-
-# NOTE: Three values are possible...
-# 0 - Blacklist textures not loaded;
-# 1 - Blacklist textures loaded;
-# -1 - Blacklist textures file does not exist or is empty.
-# By Questor
-TEXTURES_BLACK_LIST_LOADED=0
-
-F_DETAILS_TXT_REMOVE_BLACK_LIST_R=""
-function f_details_txt_remove_black_list(){
-    : 'Removes textures known to cause map problems.
-
-    These textures are listed in the file "black_list.txt" in the same folder as
-    this script.
-
-    Args:
-        INPUT_FILE (str): "*_detail.txt" file.
-    '
-
-    if [ ${TEXTURES_BLACK_LIST_LOADED} -eq -1 ] ; then
+    f_backup_folder "$WORK_FOLDER_DETAIL_S" "\"detail\" folder" 1 \
+        "$(basename "$UPSCALED_DETAIL_REL_S")"
+    f_backup_folder "$WORK_FOLDER_ENV_S" "\"env\" folder" 0 \
+        "$(basename "$UPSCALED_ENV_REL_S")"
+
+    # NOTE: The "*_detail.txt" files are not a folder, so they are gathered
+    # into one first.
+    #
+    # Counted BEFORE anything is created: a run after the first finds none of
+    # them - the first run wrote the "*_extra.txt" that replace them and took
+    # them away - and a backup of nothing is an empty tarball and a log line
+    # claiming work that did not happen. By Questor
+    local DETAIL_TXT_COUNT=0
+    DETAIL_TXT_COUNT=$(find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f \
+        -iname "*_detail.txt" | wc -l)
+    if [ ${DETAIL_TXT_COUNT} -eq 0 ]; then
+        f_manage_logs " > Backup of (\"maps\" folder) \"*_detail.txt\" files \
+skipped; there are none." "o" 1
         return
     fi
-    local INPUT_FILE=$1
-    F_DETAILS_TXT_REMOVE_BLACK_LIST_R=""
-    local LENGTH_A=0
-    local FILE_STR=""
-    declare -a TEXTURES_BLACK_LIST=()
-    if [ ${TEXTURES_BLACK_LIST_LOADED} -eq 0 ] ; then
-        f_manage_arrays_n_files "ck" "" "$SCRIPT_DIR_S/black_list.txt"
-        if [ ${F_MANAGE_ARRAYS_N_FILES_R} -eq 1 ] ; then
-            f_manage_arrays_n_files "rd" "TEXTURES_BLACK_LIST" "$SCRIPT_DIR_S/black_list.txt"
-            TEXTURES_BLACK_LIST_LOADED=1
-        else
-            TEXTURES_BLACK_LIST_LOADED=-1
+    ez_i.progress "a" " > Backing up (\"maps\" folder) \"*_detail.txt\" files..."
+    declare -A BACKUP_AT=()
+    ez_i.backup BACKUP_AT "${WORK_FOLDER_MAPS_S}_detail" 0 1
+    mkdir -p "${BACKUP_AT[full]}"
+    find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*_detail.txt" \
+        -exec cp -t "${BACKUP_AT[full]}/" {} +
+    f_compress_backup "${BACKUP_AT[path]}" "${BACKUP_AT[name]}"
+    ez_i.progress "o"
+    f_manage_logs " > Backup of (\"maps\" folder) \"*_detail.txt\" files done \
+($DETAIL_TXT_COUNT file(s))." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Back up one folder.
+
+function f_backup_folder(){
+    : 'Back up what the USER had in one folder, as a compressed tarball.
+
+    Args:
+        FOLDER (str): Folder to back up.
+        LABEL (str): How to name it in the messages.
+        CLEAR (int): 1 - Take the original material out of the folder; 0 -
+    Copy it and leave it where it is.
+        EXCLUDE (str): Name of ONE entry, directly inside FOLDER, that is
+    never backed up and never moved.
+
+    IMPORTANT: EXCLUDE is what this script itself produces - "_upscaled",
+    which lives INSIDE the folders being backed up. Without it a second run
+    treats the first run'"'"'s output as the user'"'"'s own material: it sweeps
+    hundreds of megabytes into a tarball, empties the folder, and then spends
+    the whole upscale again rebuilding exactly what it just threw away.
+    A backup is for what the user brought, never for what we made.
+    '
+
+    local FOLDER=$1
+    local LABEL=$2
+    local CLEAR=$3
+    local EXCLUDE=$4
+    if ! ez_i.exists "" "d" "$FOLDER"; then
+        f_manage_logs " > Backup of $LABEL skipped; it does not exist." "o" 1
+        return
+    fi
+    ez_i.progress "a" " > Backing up $LABEL..."
+    declare -A BACKUP_AT=()
+
+    # NOTE: "name only", so nothing is moved yet; what goes into the backup
+    # is chosen entry by entry below. By Questor
+    ez_i.backup BACKUP_AT "$FOLDER" 0 1
+
+    if [ ${CLEAR} -eq 1 ]; then
+        mkdir -p "${BACKUP_AT[full]}"
+        local MOVED=0
+        local ENTRY=""
+        local ENTRY_COUNT=0
+        ENTRY_COUNT=$(find "$FOLDER" -mindepth 1 -maxdepth 1 | wc -l)
+        while IFS= read -r -d $'"'"'\0'"'"' ENTRY; do
+            if [ -n "$EXCLUDE" ] && [ "$(basename "$ENTRY")" == "$EXCLUDE" ]; then
+                continue
+            fi
+            mv -f "$ENTRY" "${BACKUP_AT[full]}/"
+            MOVED=1
+        done < <(find "$FOLDER" -mindepth 1 -maxdepth 1 -print0)
+        if [ ${MOVED} -eq 0 ]; then
+            rmdir "${BACKUP_AT[full]}" 2> /dev/null
+            ez_i.progress "o"
+
+            # NOTE: An empty folder and a folder holding only our own output
+            # both have nothing to back up, but they are not the same thing
+            # and the log should not pretend they are. By Questor
+            if [ ${ENTRY_COUNT} -eq 0 ]; then
+                f_manage_logs " > Backup of $LABEL skipped; it is empty." "o" 1
+            else
+                f_manage_logs " > Backup of $LABEL skipped; everything in \
+it was made by this script, so there is nothing of yours to save." "o" 1
+            fi
             return
         fi
-    fi
-    LENGTH_A=${#TEXTURES_BLACK_LIST[*]}
-    if [ $LENGTH_A -gt 0 ] ; then
-        FILE_STR=$(cat "$INPUT_FILE")
+        f_compress_backup "${BACKUP_AT[path]}" "${BACKUP_AT[name]}"
     else
-        TEXTURES_BLACK_LIST_LOADED=-1
+        local BASE_NAME=""
+        BASE_NAME="$(basename "$FOLDER")"
+        local EXCLUDE_ARG=""
+        if [ -n "$EXCLUDE" ]; then
+            EXCLUDE_ARG=" --exclude \"./$BASE_NAME/$EXCLUDE\""
+        fi
+        cd "${BACKUP_AT[path]}" || f_fail "Cannot enter \"${BACKUP_AT[path]}\"!"
+        f_run "tar -czf \"${BACKUP_AT[name]}.tar.gz\"$EXCLUDE_ARG \
+--transform \"s|^\./$BASE_NAME|${BACKUP_AT[name]}|\" \"./$BASE_NAME\"" \
+            "An error occurred while compressing the backup of $LABEL!"
+        cd "$SCRIPT_DIR_S" || f_fail "Cannot return to \"$SCRIPT_DIR_S\"!"
+        BACKUPS_R+=("${BACKUP_AT[path]}/${BACKUP_AT[name]}.tar.gz")
+    fi
+    ez_i.progress "o"
+    f_manage_logs " > Backup of $LABEL done." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Compress a backup folder and remove the uncompressed copy.
+
+function f_compress_backup(){
+    : 'Compress a backup folder into a tarball beside it and remove it.
+
+    Args:
+        BACKUP_PATH (str): Folder the backup folder sits in.
+        BACKUP_NAME (str): Name of the backup folder.
+    '
+
+    local BACKUP_PATH=$1
+    local BACKUP_NAME=$2
+    if [ -z "$BACKUP_NAME" ]; then
+        f_fail "An empty backup name was given! (f_compress_backup)"
+    fi
+    cd "$BACKUP_PATH" || f_fail "Cannot enter \"$BACKUP_PATH\"!"
+    f_run "tar -czf \"$BACKUP_NAME.tar.gz\" \"$BACKUP_NAME\"" \
+        "An error occurred while compressing the backup folder!
+FOLDER: $BACKUP_PATH/$BACKUP_NAME"
+    rm -rf "${BACKUP_PATH:?}/${BACKUP_NAME:?}"
+    cd "$SCRIPT_DIR_S" || f_fail "Cannot return to \"$SCRIPT_DIR_S\"!"
+    BACKUPS_R+=("$BACKUP_PATH/$BACKUP_NAME.tar.gz")
+}
+
+# < -----------------------------------------
+
+# < --------------------------------------------------------------------------
+
+# > --------------------------------------------------------------------------
+# Produce the images.
+# --------------------------------------
+
+# > -----------------------------------------
+# Write every distinct image the run needs, as a PNG.
+
+function f_export_images(){
+    : 'Write every distinct image the run needs out of the BSPs and WADs.
+
+    The files go into one folder per upscale factor so that the upscaler can
+    take a whole folder at a time; anything already finished is not written.
+    '
+
+    ez_i.progress "a" " > Exporting images..."
+    mkdir -p "$SOURCE_DIR_S"
+    f_run "python3 \"$ASSETS_TOOL_S\" export \
+--plan \"$SCAN_FILE_S\" \
+--out \"$SOURCE_DIR_S\" \
+--done \"$FINAL_DETAIL_DIR_S\" \
+--done \"$FINAL_ENV_DIR_S\"" "An error occurred while exporting the images!"
+    ez_i.progress "o"
+    f_manage_logs " > Images exported ($F_RUN_R)." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Upscale every exported image.
+
+function f_upscale_images(){
+    : 'Upscale every exported image, one batch per upscale factor.
+
+    The ncnn upscalers take a whole folder at a time and loading their model
+    costs far more than any single image, so batching by factor means the
+    model is loaded a handful of times rather than once per image.
+    '
+
+    local BUCKET="" FACTOR="" OUT_BUCKET="" FILE="" NAME=""
+    local IN_COUNT=0 OUT_COUNT=0 TOTAL=0
+    declare -a BUCKETS=()
+    while IFS= read -r -d '' BUCKET; do
+        BUCKETS+=("$BUCKET")
+    done < <(find "$SOURCE_DIR_S" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
+
+    if [ ${#BUCKETS[*]} -eq 0 ]; then
+        f_manage_logs " > Upscaling skipped; every image is already done." "o" 1
         return
     fi
-    declare -a BLACK_LIST_REMOVED=()
-    local i=0
-    for ((i=0;i<=$(($LENGTH_A-1));i++)); do
-        if [[ "$FILE_STR" != *"${TEXTURES_BLACK_LIST[$i]}"* ]] ; then
-        # NOTE: Good performance strategy. It avoids unnecessary IO as the contents
-        # of the file can be checked in memory for each texture in the blacklist
-        # before trying to replace the values with the "sed" command. By Questor
 
+    local i=0
+    for ((i=0;i<=$((${#BUCKETS[*]}-1));i++)); do
+        BUCKET="${BUCKETS[$i]}"
+        FACTOR="$(basename "$BUCKET")"
+        OUT_BUCKET="$UPSCALED_DIR_S/$FACTOR"
+        mkdir -p "$OUT_BUCKET"
+
+        # NOTE: Drop anything this bucket already has an upscaled result for,
+        # so an interrupted run does not redo it. By Questor
+        while IFS= read -r -d '' FILE; do
+            NAME="$(basename "$FILE")"
+            if [ -f "$OUT_BUCKET/$NAME" ]; then
+                rm -f "$FILE"
+            fi
+        done < <(find "$BUCKET" -maxdepth 1 -type f -name "*.png" -print0)
+
+        IN_COUNT=$(find "$BUCKET" -maxdepth 1 -type f -name "*.png" | wc -l)
+        if [ ${IN_COUNT} -eq 0 ]; then
+            rmdir "$BUCKET" 2> /dev/null
             continue
         fi
-        f_power_sed_ecp "${TEXTURES_BLACK_LIST[$i]}" 0
-        eval "sed -i '/$F_POWER_SED_ECP_R/d' \"$INPUT_FILE\""
-        BLACK_LIST_REMOVED+=("${TEXTURES_BLACK_LIST[$i]}")
+
+        ez_i.progress "a" " > Upscaling $IN_COUNT image(s) by ${FACTOR}x (this takes a while)..."
+        f_upscale_folder "$BUCKET" "$OUT_BUCKET" "$FACTOR"
+        ez_i.progress "o"
+
+        OUT_COUNT=$(find "$OUT_BUCKET" -maxdepth 1 -type f -name "*.png" | wc -l)
+        if [ ${OUT_COUNT} -lt ${IN_COUNT} ]; then
+            f_fail "The upscaler did not produce every image!
+FACTOR: ${FACTOR}x
+EXPECTED AT LEAST: $IN_COUNT
+PRODUCED: $OUT_COUNT
+INPUT: $BUCKET
+OUTPUT: $OUT_BUCKET"
+        fi
+        rm -rf "${BUCKET:?}"
+        TOTAL=$((TOTAL+IN_COUNT))
+        f_manage_logs " > Upscaled $IN_COUNT image(s) by ${FACTOR}x." "o" 1
     done
-    local LENGTH_B=${#BLACK_LIST_REMOVED[*]}
-    if [ $LENGTH_B -eq 0 ] ; then
-        F_DETAILS_TXT_REMOVE_BLACK_LIST_R="<NONE>"
+    f_manage_logs " > Upscaling done ($TOTAL image(s))." "o" 1
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Upscale one whole folder.
+
+# [Ref(s).: https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan#full-usages ]
+function f_upscale_folder(){
+    : 'Upscale every PNG in a folder into another folder.
+
+    Args:
+        IN_DIR (str): Folder of PNGs to upscale.
+        OUT_DIR (str): Folder to write the results into.
+        FACTOR (int): Upscale factor.
+    '
+
+    local IN_DIR=$1
+    local OUT_DIR=$2
+    local FACTOR=$3
+    local TTA_MODE=""
+    if [ ${RSRGAN_ENABLE_TTA_S} -eq 1 ]; then
+        TTA_MODE=" -x"
+    fi
+
+    # NOTE: The factors this can be called with come from UPSCALE_FACTORS_S,
+    # which MUST match REALESRGAN_MODEL_S. Asking a fixed 4x model such as
+    # "realesrgan-x4plus" for another factor is what fails with
+    # "find_blob_index_by_name data failed"; there is no retry loop here
+    # because the pair is a configuration question, not a runtime one.
+    # By Questor
+    f_run "\"$REALESRGAN_BIN_S\" -i \"$IN_DIR\" -o \"$OUT_DIR\" \
+-s $FACTOR -n \"$REALESRGAN_MODEL_S\" -f png$TTA_MODE" \
+        "An error occurred while upscaling with \"$REALESRGAN_BIN_S\"!
+MODEL: $REALESRGAN_MODEL_S
+FACTOR: ${FACTOR}x
+If the error mentions \"find_blob_index_by_name\", the model does not support
+this factor. Check REALESRGAN_MODEL_S and UPSCALE_FACTORS_S in \"config.bash\"." 0
+
+    # NOTE: These tools report progress on stderr and keep going past a single
+    # bad file, so the exit code alone is not enough. The caller also compares
+    # how many files came out against how many went in. By Questor
+    if echo "${F_RUN_RESULT[both]}" | grep -iq "failed\|invalid\|unsupported"; then
+        f_fail "The upscaler reported a problem!
+OUTPUT: ${F_RUN_RESULT[both]}
+INPUT: $IN_DIR"
+    fi
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Resize, sharpen and compress every upscaled image into its final place.
+
+function f_finish_images(){
+    : 'Resize, sharpen and compress every upscaled image into its final place.
+
+    The final name is the image'\''s content hash, which is what the
+    "*_extra.txt" files point at.
+    '
+
+    local FILE="" HASH="" FACTOR="" RESIZE="" TARGET="" KIND=""
+    declare -a PENDING=()
+    while IFS= read -r -d '' FILE; do
+        PENDING+=("$FILE")
+    done < <(find "$UPSCALED_DIR_S" -mindepth 2 -maxdepth 2 -type f -name "*.png" -print0 2> /dev/null)
+
+    local TOTAL=${#PENDING[*]}
+    if [ ${TOTAL} -eq 0 ]; then
+        f_manage_logs " > Finishing skipped; every image is already done." "o" 1
         return
     fi
-    local j=0
-    local COMMA_AND=""
-    for ((j=0;j<=$(($LENGTH_B-1));j++)); do
-        if [ $j -eq 0 ] ; then
-            COMMA_AND=""
-        elif [ $(($LENGTH_B-1)) -eq $j ] ; then
-            COMMA_AND=" and "
+
+    mkdir -p "$FINAL_DETAIL_DIR_S" "$FINAL_ENV_DIR_S"
+    declare -A FINISH_TASK=()
+    ez_i.task_stats_init FINISH_TASK "$TOTAL"
+    local TASK_STATS=""
+    local i=0
+    for ((i=0;i<=$((TOTAL-1));i++)); do
+        ez_i.task_stats_begin FINISH_TASK
+        FILE="${PENDING[$i]}"
+        HASH="$(basename "$FILE" ".png")"
+
+        # NOTE: A hash is either a texture or a "skyname" side, and the two go
+        # to different folders. By Questor
+        RESIZE=""
+        if json_like.get RESIZE "$SCAN_R" "images" "$HASH" "resize" 2> /dev/null; then
+            TARGET="$FINAL_DETAIL_DIR_S/$HASH.png"
+            KIND="texture"
+        elif json_like.get RESIZE "$SCAN_R" "sky" "$HASH" "resize" 2> /dev/null; then
+            TARGET="$FINAL_ENV_DIR_S/$HASH.png"
+            KIND="skyname"
         else
-            COMMA_AND=", "
+            f_fail "An upscaled image is in no scan!
+FILE: $FILE
+This usually means \"$WORK_DIR_S\" is left over from a run with different
+settings. Delete it and run this script again."
         fi
-        F_DETAILS_TXT_REMOVE_BLACK_LIST_R="$F_DETAILS_TXT_REMOVE_BLACK_LIST_R$COMMA_AND\"${BLACK_LIST_REMOVED[$j]}\""
+
+        ez_i.progress "a" " > Finishing the PNG image ($KIND)..."
+        f_finish_image "$FILE" "$TARGET" "$RESIZE"
+        ez_i.progress "o"
+        rm -f "$FILE"
+        ez_i.task_stats_end TASK_STATS FINISH_TASK
+        f_manage_logs " > PNG finished ($KIND): $TARGET
+$TASK_STATS" "o" 1
     done
+    rm -rf "${UPSCALED_DIR_S:?}"
+    f_manage_logs " > Finishing done ($TOTAL image(s))." "o" 1
 }
 
 # < -----------------------------------------
 
 # > -----------------------------------------
-# Adjust details ("*_detail.txt") files to Renderer 1.5c format.
+# Resize, sharpen and compress one image.
 
-# [Ref(s).: https://stackoverflow.com/a/24230154/3223785 ,
-# https://stackoverflow.com/a/24233771/3223785 ,
-# https://stackoverflow.com/a/27658733/3223785 ]
-function f_adjust_details_txt(){
-    : 'Adjust details ("*_detail.txt") files to Renderer 1.5c format.'
-
-    local INPUT_FILE=""
-    f_process_in_progress "a" " > Listing details (\"*_detail.txt\")..."
-    declare -a DETAIL_TXT_FILES=()
-    while IFS= read -r -d '' INPUT_FILE; do
-        DETAIL_TXT_FILES+=("$INPUT_FILE")
-    done < <(find "$WORK_FOLDER_MAPS_S" -maxdepth 1 -type f -iname "*_detail.txt" -print0)
-    f_process_in_progress "o"
-    f_manage_logs " > Details (\"*_detail.txt\") listed." "o" 1
-    local BLACK_LIST_TEXTURES=""
-    local LENGTH_A=${#DETAIL_TXT_FILES[*]}
-    f_long_task_stats "s" $LENGTH_A
-    local i=0
-    for ((i=0;i<=$(($LENGTH_A-1));i++)); do
-        f_long_task_stats "a"
-        f_details_txt_remove_black_list "${DETAIL_TXT_FILES[$i]}"
-        sed -i '/	detail\//s/^/	{"base" : "/' "${DETAIL_TXT_FILES[$i]}"
-        f_power_sed "	detail/" "\", \"replace\" : \"gfx/detail/_upscaled/" "${DETAIL_TXT_FILES[$i]}" "" 0
-        f_power_sed "	1.0	1.0" ".png\", \"replacescale\" : \"1.0 1.0\"}," "${DETAIL_TXT_FILES[$i]}" "" 0
-        sed -i -z 's/\t{"base" : "/\[\r\n\t{"base" : "/1' "${DETAIL_TXT_FILES[$i]}"
-        sed -i -z 's/\(.*\)\.png", "replacescale" : "1\.0 1\.0"},/\1\.png", "replacescale" : "1\.0 1\.0"}\r\n\]/' "${DETAIL_TXT_FILES[$i]}"
-        mv "${DETAIL_TXT_FILES[$i]}" "${DETAIL_TXT_FILES[$i]::-11}_extra.txt"
-        f_long_task_stats "o"
-        f_manage_logs " > Detail (\"*_detail.txt\") adjusted: ${DETAIL_TXT_FILES[$i]}
-REMOVED BLACKLISTED TEXTURES: $F_DETAILS_TXT_REMOVE_BLACK_LIST_R
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Add "skynames" to extras (\"*_extra.txt\") (Renderer 1.5c).
-# --------------------------------------
-
-# > -----------------------------------------
-# Add "skynames" to extras (\"*_extra.txt\") (Renderer 1.5c).
-
-# [Ref(s).: https://stackoverflow.com/a/4182643/3223785 ,
-# https://stackoverflow.com/a/24230154/3223785 ,
-# https://stackoverflow.com/a/24233771/3223785 ,
-# https://stackoverflow.com/a/27658733/3223785 ]
-function f_add_skynames_to_extras_txt(){
-    : 'Add "skynames" to extras (\"*_extra.txt\") (Renderer 1.5c).'
-
-    local NEW_LINE=""
-    local COMMA=""
-    local INPUT_FILE=""
-    local SKY_ITEMS=""
-    local LENGTH_A=${#F_SKYNAME_N_UPSCL_FACT_R[*]}
-    local LENGTH_B=$(($LENGTH_A/8))
-    f_long_task_stats "s" $LENGTH_B
-    local i=0
-    local j=0
-    local h=0
-    for ((i=0;i<=$(($LENGTH_A-1));i+=8)); do
-        f_long_task_stats "a"
-        INPUT_FILE="${WORK_FOLDER_MAPS_S}/${F_SKYNAME_N_UPSCL_FACT_R[$i]}_extra.txt"
-        NEW_LINE=""
-        COMMA=","
-        SKY_ITEMS=""
-        h=0
-        for ((j=$(($i+2));j<=$(($i+7));j++)); do
-            if [ ${h} -eq 5 ] ; then
-                COMMA=""
-            fi
-            SKY_ITEMS+="$NEW_LINE			\"${SKY_SIDES[$h]}\" : \"gfx/env/_upscaled/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png\"$COMMA"
-            NEW_LINE="
-"
-            ((h++))
-        done
-        f_power_sed "	{\"base\" : \"" "	{\"base\" : \"sky\", \"replace\" : 
-		{
-$SKY_ITEMS
-		}
-	},
-	{\"base\" : \"" "$INPUT_FILE" "" 1
-
-        # NOTE: Normalizing line endings to MS-DOS (CRLF). By Questor
-        sed -i $'s/\r$//' "$INPUT_FILE"
-        sed -i $'s/$/\r/' "$INPUT_FILE"
-
-        f_long_task_stats "o"
-        f_manage_logs " > \"Skyname\" added to extra (\"*_extra.txt\"): $INPUT_FILE
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Upscale image.
-# --------------------------------------
-
-# > -----------------------------------------
-# Upscale image.
-
-function f_upscale_image(){
-    : 'Upscale image.
-
-    Args:
-        INPUT_FILE (str): Input image;
-        OUTPUT_FILE (str): Output image;
-        UPSCL_FACT (Optional[int]): Upscale factor. Required if '\''UPSCALER_IN_USE_S="w"'\''.
-    '
-
-    local INPUT_FILE=$1
-    local OUTPUT_FILE=$2
-    local UPSCL_FACT=$3
-    local RSRGAN_TTA_MODE=""
-    local BLOB_INDEX_ERROR_NOW=""
-    if [ "$UPSCALER_IN_USE_S" == "w" ] ; then
-        f_get_stderr_stdout "$WAIFU2X_BIN_S -i \"$INPUT_FILE\" -o \"$OUTPUT_FILE\" -s $UPSCL_FACT -n 3 -x"
-        if (echo "$F_GET_STOUTERR" | grep -iq "error\|usage\|failed") || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            f_process_in_progress "o"
-            local ERROR_NOW="An error occurred while upscaling the PNG image ($WAIFU2X_BIN_S)!
-ERROR: $F_GET_STOUTERR
-FILE: $INPUT_FILE"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-    elif [ "$UPSCALER_IN_USE_S" == "r" ] ; then
-        if [ ${RSRGAN_ENABLE_TTA_S} -eq 1 ] ; then
-            RSRGAN_TTA_MODE=" -x"
-        fi
-
-        # NOTE: This workaround is to handle an intermittent "realesrgan-ncnn-vulkan"
-        # bug. By Questor
-        while true ; do
-            f_get_stderr_stdout "$REALESRGAN_BIN_S -i \"$INPUT_FILE\" -o \"$OUTPUT_FILE\"$RSRGAN_TTA_MODE -n realesrgan-x4plus"
-            if [[ "$F_GET_STDERR_R" != *"find_blob_index_by_name data failed"* ]] ; then
-                break
-            else
-                BLOB_INDEX_ERROR_NOW="An error occurred while upscaling the PNG image ($REALESRGAN_BIN_S)! A workaround was used to solve it.
-ERROR: $F_GET_STDERR_R
-FILE: $INPUT_FILE"
-                f_manage_logs "$BLOB_INDEX_ERROR_NOW" "e"
-            fi
-        done
-
-        # NOTE: Handle other possible errors. If so, execution will stop. By Questor
-        if (echo "$F_GET_STOUTERR" | grep -iq "error\|usage\|failed") || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            f_process_in_progress "o"
-            local ERROR_NOW="An error occurred while upscaling the PNG image ($REALESRGAN_BIN_S)!
-ERROR: $F_GET_STOUTERR
-FILE: $INPUT_FILE"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-    fi
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Upscale "skynames".
-
-function f_upscale_skynames(){
-    : 'Upscale "skynames".'
-
-    local PNG_DIR=""
-    local INPUT_FILE=""
-    local UPSCL_DIR=""
-    local OUTPUT_FILE=""
-    local LENGTH_A=${#F_SKYNAME_N_UPSCL_FACT_R[*]}
-    local LENGTH_B=$(($LENGTH_A-(($LENGTH_A/8)*2)))
-    local UPSCL_FACT=0
-    f_long_task_stats "s" $LENGTH_B
-    local i=0
-    local j=0
-    for ((i=0;i<=$(($LENGTH_A-1));i+=8)); do
-        UPSCL_FACT=${F_SKYNAME_N_UPSCL_FACT_R[$((i + 1))]}
-        for ((j=$(($i+2));j<=$(($i+7));j++)); do
-            f_long_task_stats "a"
-            if [ -z "$PNG_DIR" ] ; then
-                PNG_DIR="$(dirname "${F_SKYNAME_N_UPSCL_FACT_R[$j]}")/_PNG"
-            fi
-            INPUT_FILE="$PNG_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-            if [ -f "$INPUT_FILE" ] ; then
-            # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-                f_process_in_progress "a" " > Upscaling \"skyname\"..."
-                if [ -z "$UPSCL_DIR" ] ; then
-                    UPSCL_DIR="$(dirname "${F_SKYNAME_N_UPSCL_FACT_R[$j]}")/_UPSCL"
-                    mkdir -p "$UPSCL_DIR"
-                fi
-                OUTPUT_FILE="$UPSCL_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-                f_upscale_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT
-                rm -f "$INPUT_FILE"
-                f_process_in_progress "o"
-                f_long_task_stats "o"
-            else
-                f_long_task_stats "k"
-            fi
-            f_manage_logs " > Upscaled (\"skyname\"): $INPUT_FILE
-$F_LONG_TASK_STATS_R" "o" 1
-        done
-    done
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Upscale textures.
-
-# [Ref(s).: https://unix.stackexchange.com/a/132481/61742 , 
-# https://unix.stackexchange.com/a/267065/61742 , 
-# https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan#full-usages ]
-function f_upscale_textures(){
-    : 'Upscale textures.'
-
-    local PNG_DIR=""
-    local INPUT_FILE=""
-    local UPSCL_DIR=""
-    local OUTPUT_FILE=""
-    local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    f_long_task_stats "s" $LENGTH 3 0
-    local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
-        f_long_task_stats "a"
-        PNG_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_PNG"
-        INPUT_FILE="$PNG_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-        if [ -f "$INPUT_FILE" ] ; then
-        # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-            f_process_in_progress "a" " > Upscaling texture..."
-            UPSCL_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_UPSCL"
-            mkdir -p "$UPSCL_DIR"
-            OUTPUT_FILE="$UPSCL_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-            f_upscale_image "$INPUT_FILE" "$OUTPUT_FILE" ${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]}
-            rm -f "$INPUT_FILE"
-            f_process_in_progress "o"
-            f_long_task_stats "o"
-        else
-            f_long_task_stats "k"
-        fi
-        f_manage_logs " > Upscaled (texture): $INPUT_FILE
-$F_LONG_TASK_STATS_R" "o" 1
-    done
-}
-
-# < -----------------------------------------
-
-# < --------------------------------------------------------------------------
-
-# > --------------------------------------------------------------------------
-# Compress, move and/or resize a image.
-# --------------------------------------
-
-# > -----------------------------------------
-# Compress, move and/or resize a image.
-
-# [Ref(s).: https://stackoverflow.com/a/24421013/3223785 ]
-# https://askubuntu.com/a/271797/134723 , 
-# https://www.halolinux.us/ubuntu-hacks/sharpen-images-at-the-command-line.html ]
-F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R=""
-function f_compress_move_n_or_resize_image(){
-    : 'Compress, move and/or resize a image.
-
-    Args:
-        INPUT_FILE (str): Input image;
-        OUTPUT_FILE (str): Output image;
-        UPSCL_FACT (Optional[int]): Upscale factor. Required if '\''UPSCALER_IN_USE_S="r"'\''.
-        RESIZE_PARAM (Optional[str]): Upscale factor. May be necessary if "TRY_MAX_PX_S=1".
-    '
-
-    F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R=""
-    local RESIZE_FACT=0
-    local INPUT_FILE=$1
-    local OUTPUT_FILE=$2
-    local UPSCL_FACT=$3
-    if [ -z "$UPSCL_FACT" ] ; then
-        UPSCL_FACT=-1
-    fi
-    local RESIZE_PARAM=$4
-    if [ -z "$RESIZE_PARAM" ] ; then
-        RESIZE_PARAM=""
-    fi
-    local SHARPEN_PARAM=""
-    local SHARPENING_ACT=""
-    local SHARPED_ACT=""
-    if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
-        SHARPEN_PARAM=" -sharpen 0x$SHARPEN_IMGS_S"
-        SHARPENING_ACT=", sharpening"
-        SHARPED_ACT=", sharped"
-    fi
-    if [ ${TRY_MAX_PX_S} -eq 1 ] && [ -n "$RESIZE_PARAM" ] ; then
-        f_process_in_progress "a" " > Resizing (TRY_MAX_PX_S=1)$SHARPENING_ACT and moving the PNG image..."
-        f_get_stderr_stdout "convert \"$INPUT_FILE\" -resize $RESIZE_PARAM$SHARPEN_PARAM \"$OUTPUT_FILE\""
-        if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            f_process_in_progress "o"
-            local ERROR_NOW=="An error occurred while resizing (TRY_MAX_PX_S=1)$SHARPENING_ACT and moving the PNG image!
-ERROR: $F_GET_STDERR_R
-FILE: $INPUT_FILE"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="resized (TRY_MAX_PX_S=1)$SHARPED_ACT, moved"
-    elif [ "$UPSCALER_IN_USE_S" == "r" ] && [ $UPSCL_FACT -lt $MAX_UPSCL_FACT_S ]; then
-        f_process_in_progress "a" " > Resizing$SHARPENING_ACT and moving the PNG image..."
-
-        # NOTE: Due to a BUG in "realesrgan-ncnn-vulkan" it only supports upscaling
-        # to 4. Therefore, we need to make size adjustments (reduce if necessary).
-        # By Questor
-        # [Ref(s).: https://legacy.imagemagick.org/Usage/resize/ , https://github-com.translate.goog/xinntao/Real-ESRGAN/issues/203?_x_tr_sl=
-        # pt&_x_tr_tl=en&_x_tr_hl=en&_x_tr_pto=wapp ]
-        RESIZE_FACT=$((100/($MAX_UPSCL_FACT_S/$UPSCL_FACT)))
-
-        f_get_stderr_stdout "convert \"$INPUT_FILE\" -resize $RESIZE_FACT%$SHARPEN_PARAM \"$OUTPUT_FILE\""
-        if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-            f_process_in_progress "o"
-            local ERROR_NOW=="An error occurred while resizing$SHARPENING_ACT and moving the PNG image!
-ERROR: $F_GET_STDERR_R
-FILE: $INPUT_FILE"
-            f_manage_logs "$ERROR_NOW" "e"
-            f_error_exit "$ERROR_NOW"
-        fi
-        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="resized$SHARPED_ACT, moved"
-    else
-        SHARPENING_ACT="Moving"
-        if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
-            SHARPENING_ACT="Sharpening and moving"
-            SHARPED_ACT="sharped, "
-        fi
-        f_process_in_progress "a" " > $SHARPENING_ACT the PNG image..."
-        if [ ${SHARPEN_IMGS_S} -ne -1 ] ; then
-            f_get_stderr_stdout "convert \"$INPUT_FILE\"$SHARPEN_PARAM \"$OUTPUT_FILE\""
-            if [ "$F_GET_STDERR_R" != "" ] || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-                f_process_in_progress "o"
-                local ERROR_NOW=="An error occurred while sharpening and moving the PNG image!
-ERROR: $F_GET_STDERR_R
-FILE: $INPUT_FILE"
-                f_manage_logs "$ERROR_NOW" "e"
-                f_error_exit "$ERROR_NOW"
-            fi
-        else
-        mv "$INPUT_FILE" "$OUTPUT_FILE"
-        fi
-        F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="${SHARPED_ACT}moved"
-    fi
-    rm -f "$INPUT_FILE"
-    f_process_in_progress "o"
-    f_process_in_progress "a" " > Compressing the PNG image..."
-    f_get_stderr_stdout "oxipng -o 3 -i 1 --strip safe \"$OUTPUT_FILE\""
-    if (echo "$F_GET_STOUTERR" | grep -iq "error\|usage\|failed") || [ $F_GET_EXIT_CODE_R -gt 0 ] ; then
-        f_process_in_progress "o"
-        local ERROR_NOW=="An error occurred while compressing the PNG image!
-ERROR: $F_GET_STOUTERR
-FILE: $OUTPUT_FILE"
-        f_manage_logs "$ERROR_NOW" "e"
-        f_error_exit "$ERROR_NOW"
-    fi
-    f_process_in_progress "o"
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Clean "skyname" folder.
-
-function f_clean_skyname_fd(){
-    : 'Clean "skyname" folder.'
-
-    local ENV_ITEMS=$(find "$WORK_FOLDER_ENV_S" \
-        -mindepth 1 \
-        -maxdepth 1 \
-        -iname "*" \
-        -not -path "$WORK_FOLDER_ENV_S/_upscaled*" \
-        -print \
-        -quit)
-    if [ -n "$ENV_ITEMS" ] ; then
-    # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-        f_process_in_progress "a" " > Cleaning \"skyname\" folder..."
-        find "$WORK_FOLDER_ENV_S" \
-            -mindepth 1 -maxdepth 1 \
-            -iname "*" \
-            -not -path "$WORK_FOLDER_ENV_S/_upscaled*" \
-            -exec rm -rf {} +
-        f_process_in_progress "o"
-        f_manage_logs " > \"Skyname\" folder cleaned." "o" 1
-    else
-        f_manage_logs " > Cleaning \"skyname\" folder skipped." "o" 1
-    fi
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Compress, move and/or resize a skynames.
-
-function f_compress_move_n_or_resize_skynames(){
-    : 'Compress, move and/or resize a skynames.'
-
-    local UPSCL_DIR=""
-    local INPUT_FILE=""
-    local OUTPUT_FILE=""
-    local UPSCALED_DIR=""
-    local UPSCL_FACT=0
-    local LENGTH_A=${#F_SKYNAME_N_UPSCL_FACT_R[*]}
-    local LENGTH_B=$(($LENGTH_A-(($LENGTH_A/8)*2)))
-    f_long_task_stats "s" $LENGTH_B
-    local i=0
-    local j=0
-    for ((i=0;i<=$(($LENGTH_A-1));i+=8)); do
-        UPSCL_FACT=${F_SKYNAME_N_UPSCL_FACT_R[$((i + 1))]}
-        for ((j=$(($i+2));j<=$(($i+7));j++)); do
-            f_long_task_stats "a"
-            if [ -z "$UPSCL_DIR" ] ; then
-                UPSCL_DIR="$(dirname "${F_SKYNAME_N_UPSCL_FACT_R[$j]}")/_UPSCL"
-            fi
-            INPUT_FILE="$UPSCL_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-            if [ -f "$INPUT_FILE" ] ; then
-            # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-                if [ -z "$UPSCALED_DIR" ] ; then
-                    UPSCALED_DIR="$(dirname "${F_SKYNAME_N_UPSCL_FACT_R[$j]}")/_upscaled"
-                    mkdir -p "$UPSCALED_DIR"
-                fi
-                OUTPUT_FILE="$UPSCALED_DIR/"$(basename "${F_SKYNAME_N_UPSCL_FACT_R[$j]}" ".${F_SKYNAME_N_UPSCL_FACT_R[$j]##*.}")".png"
-                f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" $UPSCL_FACT ""
-                f_long_task_stats "o"
-            else
-                F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="<SKIPPED ITEM>"
-                f_long_task_stats "k"
-            fi
-            f_manage_logs " > PNG $F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R and compressed (\"skyname\"): $INPUT_FILE
-$F_LONG_TASK_STATS_R" "o" 1
-        done
-    done
-    f_clean_skyname_fd
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Clean and move texture folders.
-
-# [Ref(s).: https://stackoverflow.com/a/15736463/3223785 ,
-# https://unix.stackexchange.com/a/89937/61742 ]
-function f_clean_n_move_texture_fds(){
-    : 'Clean and move texture folders.'
-
-    local ROOT_FOLDERS=$(find "$WORK_FOLDER_DETAIL_S" \
-        -mindepth 2 \
-        -maxdepth 2 \
-        -name "root" \
-        -type d \
-        -print \
-        -quit)
-    if [ -n "$ROOT_FOLDERS" ] ; then
-    # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-        f_process_in_progress "a" " > Cleaning texture folders..."
-
-        # NOTE: Remove "root" folders. By Questor
-        find "$WORK_FOLDER_DETAIL_S" \
-            -mindepth 2 \
-            -maxdepth 2 \
-            -name "root" \
-            -type d \
-            -exec rm -rf {} +
-
-        f_process_in_progress "o"
-        f_manage_logs " > Texture folders cleaned." "o" 1
-    else
-        f_manage_logs " > Cleaning texture folders skipped." "o" 1
-    fi
-
-    local FOLDERS_TO_MOVE=$(find "$WORK_FOLDER_DETAIL_S" \
-        -mindepth 1 \
-        -maxdepth 1 \
-        -iname "*" \
-        -not -path "$WORK_FOLDER_DETAIL_S/_upscaled*" \
-        -type d \
-        -print \
-        -quit)
-    if [ -n "$FOLDERS_TO_MOVE" ] ; then
-    # NOTE: Necessary for when there is an unfinished upscale process. By Questor
-
-        f_process_in_progress "a" " > Moving texture folders..."
-
-        # NOTE: Create a folder for the final destination of the folders with the
-        # texture set for each map. By Questor
-        mkdir -p "$WORK_FOLDER_DETAIL_S/_upscaled"
-
-        # NOTE: Move the folders with the texture set for each map to the final destination.
-        # By Questor
-        find "$WORK_FOLDER_DETAIL_S" \
-            -mindepth 1 -maxdepth 1 \
-            -iname "*" \
-            -not -path "$WORK_FOLDER_DETAIL_S/_upscaled*" \
-            -type d \
-            -exec mv -t "$WORK_FOLDER_DETAIL_S/_upscaled/" {} +
-
-        f_process_in_progress "o"
-        f_manage_logs " > Texture folders moved." "o" 1
-    else
-        f_manage_logs " > Moving texture folders skipped." "o" 1
-    fi
-}
-
-# < -----------------------------------------
-
-# > -----------------------------------------
-# Compress, move and/or resize a textures.
-
-# [Ref(s).: https://stackoverflow.com/a/27269509/3223785 ,
-# https://sburris.xyz/posts/best-png-compression/ ,
-# https://manpages.ubuntu.com/manpages/focal/en/man1/pngcrush.1.html ,
+# [Ref(s).: https://legacy.imagemagick.org/Usage/resize/ ,
+# https://www.halolinux.us/ubuntu-hacks/sharpen-images-at-the-command-line.html ,
 # https://github.com/shssoichiro/oxipng ]
-function f_compress_move_n_or_resize_textures(){
-    : 'Compress, move and/or resize a textures.'
+function f_finish_image(){
+    : 'Resize, sharpen and compress one image into its final place.
 
-    local UPSCL_DIR=""
-    local INPUT_FILE=""
-    local BSP_ENVS_FD=""
-    local OUTPUT_FILE=""
-    local LENGTH=${#F_TEXTURE_N_UPSCL_FACT_R[*]}
-    f_long_task_stats "s" $LENGTH 3 0
-    local i=0
-    for ((i=0;i<=$(($LENGTH-1));i+=3)); do
-        f_long_task_stats "a"
-        UPSCL_DIR="$(dirname "${F_TEXTURE_N_UPSCL_FACT_R[$i]}")/_UPSCL"
-        INPUT_FILE="$UPSCL_DIR/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-        if [ -f "$INPUT_FILE" ] ; then
-        # NOTE: Necessary for when there is an unfinished upscale process. By Questor
+    Args:
+        INPUT_FILE (str): Upscaled image.
+        OUTPUT_FILE (str): Where the finished image goes.
+        RESIZE (str): ImageMagick geometry, or "" for no resize.
+    '
 
-            BSP_ENVS_FD="${F_TEXTURE_N_UPSCL_FACT_R[$i]%/*/*}"
-            OUTPUT_FILE="$BSP_ENVS_FD/"$(basename "${F_TEXTURE_N_UPSCL_FACT_R[$i]}" ".${F_TEXTURE_N_UPSCL_FACT_R[$i]##*.}")".png"
-            f_compress_move_n_or_resize_image "$INPUT_FILE" "$OUTPUT_FILE" ${F_TEXTURE_N_UPSCL_FACT_R[$((i + 1))]} "${F_TEXTURE_N_UPSCL_FACT_R[$((i + 2))]}"
-            f_long_task_stats "o"
-        else
-            F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R="<SKIPPED ITEM>"
-            f_long_task_stats "k"
+    local INPUT_FILE=$1
+    local OUTPUT_FILE=$2
+    local RESIZE=$3
+    local RESIZE_PARAM=""
+    local SHARPEN_PARAM=""
+
+    if [ -n "$RESIZE" ]; then
+
+        # NOTE: The "!" tells ImageMagick to ignore the aspect ratio and give
+        # exactly this size. It is quoted because several shells treat it
+        # specially. By Questor
+        RESIZE_PARAM=" -resize '$RESIZE'"
+    fi
+    if [ ${SHARPEN_IMGS_S} -ne -1 ]; then
+        SHARPEN_PARAM=" -sharpen 0x$SHARPEN_IMGS_S"
+    fi
+
+    f_run "\"$MAGICK_BIN_S\" \"$INPUT_FILE\"$RESIZE_PARAM$SHARPEN_PARAM \"$OUTPUT_FILE\"" \
+        "An error occurred while resizing/sharpening the PNG image!
+FILE: $INPUT_FILE"
+
+    if [ ${PNG_COMPRESS_LEVEL_S} -ne -1 ]; then
+        # NOTE: "-i 0" writes a NON interlaced PNG. The old pipeline passed
+        # "-i 1", which interlaces, and an interlaced PNG is typically larger
+        # - the opposite of the point of running a compressor, and of no use
+        # at all to a texture the engine loads whole. By Questor
+        f_run "oxipng -o $PNG_COMPRESS_LEVEL_S -i 0 --strip safe --quiet \"$OUTPUT_FILE\"" \
+            "An error occurred while compressing the PNG image!
+FILE: $OUTPUT_FILE" 0
+    fi
+}
+
+# < -----------------------------------------
+
+# < --------------------------------------------------------------------------
+
+# > --------------------------------------------------------------------------
+# Write the "*_extra.txt" files.
+# --------------------------------------
+
+# > -----------------------------------------
+# Escape a string for JSON.
+
+# NOTE: Texture names come out of a 16 byte binary field, so while a quote or
+# a backslash in one would be unusual it is not impossible, and an unescaped
+# one would produce an "*_extra.txt" the renderer cannot read. By Questor
+F_JSON_ESCAPE_R=""
+function f_json_escape(){
+    : 'Escape a string so it can go inside a JSON string literal.
+
+    Args:
+        VALUE (str): String to escape.
+
+    Returns:
+        F_JSON_ESCAPE_R (str): The escaped string.
+    '
+
+    local VALUE=$1
+    VALUE="${VALUE//\\/\\\\}"
+    VALUE="${VALUE//\"/\\\"}"
+    VALUE="${VALUE//	/\\t}"
+    F_JSON_ESCAPE_R="$VALUE"
+}
+
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Write the "*_extra.txt" files.
+
+# NOTE: This is the file that makes everything else usable: it maps each
+# texture NAME a map uses onto the hash named PNG that replaces it. Because
+# the name lives here and not in the file name, two maps that share an image
+# share the one file, and two different images that happen to share a name do
+# not collide. By Questor
+# [Ref(s).: https://stackoverflow.com/a/73628324/3223785 ]
+declare -a SKY_SIDES=("rt" "bk" "lf" "ft" "up" "dn")
+function f_write_extra_txt(){
+    : 'Write one "*_extra.txt" (Renderer 1.5c) per map.'
+
+    local MAP_COUNT=0 MAP_NAME="" OUTPUT_FILE=""
+    local TEXTURE_COUNT=0 SKY_COUNT=0
+    local BASE="" HASH="" SIDE="" BODY="" SKY_BODY="" SEPARATOR=""
+    local DETAIL_TXT=""
+    local i=0 j=0
+
+    f_model_length "map_order"
+    MAP_COUNT=$F_MODEL_LENGTH_R
+    declare -A EXTRA_TASK=()
+    ez_i.task_stats_init EXTRA_TASK "$MAP_COUNT"
+    local TASK_STATS=""
+    for ((i=0;i<=$((MAP_COUNT-1));i++)); do
+        ez_i.task_stats_begin EXTRA_TASK
+        f_model "map_order" "$i"
+        MAP_NAME=$F_MODEL_R
+        OUTPUT_FILE="$WORK_FOLDER_MAPS_S/${MAP_NAME}_extra.txt"
+        BODY=""
+        SEPARATOR=""
+
+        # > ----- the skybox, which has to come first -----
+        f_model_length "maps" "$MAP_NAME" "sky"
+        SKY_COUNT=$F_MODEL_LENGTH_R
+        if [ ${SKY_COUNT} -gt 0 ]; then
+            SKY_BODY=""
+            local SKY_SEPARATOR=""
+            for ((j=0;j<=$((SKY_COUNT-1));j++)); do
+                json_like.get SIDE "$SCAN_R" "maps" "$MAP_NAME" "sky" "$j" "side" 2> /dev/null || continue
+                json_like.get HASH "$SCAN_R" "maps" "$MAP_NAME" "sky" "$j" "hash" 2> /dev/null || continue
+                SKY_BODY+="$SKY_SEPARATOR			\"$SIDE\" : \"$UPSCALED_ENV_REL_S/$HASH.png\""
+                SKY_SEPARATOR=",
+"
+            done
+            BODY+="	{\"base\" : \"sky\", \"replace\" :
+		{
+$SKY_BODY
+		}
+	}"
+            SEPARATOR=",
+"
         fi
-        f_manage_logs " > PNG $F_COMPRESS_MOVE_N_OR_RESIZE_IMAGE_R and compressed (texture): $INPUT_FILE
-$F_LONG_TASK_STATS_R" "o" 1
+        # < ----- the skybox, which has to come first -----
+
+        # > ----- the textures -----
+        f_model_length "maps" "$MAP_NAME" "texture_list"
+        TEXTURE_COUNT=$F_MODEL_LENGTH_R
+        for ((j=0;j<=$((TEXTURE_COUNT-1));j++)); do
+            json_like.get BASE "$SCAN_R" "maps" "$MAP_NAME" "texture_list" "$j" "base" 2> /dev/null || continue
+            json_like.get HASH "$SCAN_R" "maps" "$MAP_NAME" "texture_list" "$j" "hash" 2> /dev/null || continue
+            f_json_escape "$BASE"
+            BODY+="$SEPARATOR	{\"base\" : \"$F_JSON_ESCAPE_R\", \"replace\" : \"$UPSCALED_DETAIL_REL_S/$HASH.png\", \"replacescale\" : \"1.0 1.0\"}"
+            SEPARATOR=",
+"
+        done
+        # < ----- the textures -----
+
+        if [ -z "$BODY" ]; then
+            ez_i.task_stats_skip TASK_STATS EXTRA_TASK
+            f_manage_logs " > Extra (\"*_extra.txt\") skipped; \"$MAP_NAME\" has nothing to replace.
+$TASK_STATS" "o" 1
+            continue
+        fi
+
+        # NOTE: Written with MS-DOS (CRLF) line endings, which is what the
+        # files this format came from use. By Questor
+        printf '[\r\n%s\r\n]\r\n' "$BODY" | sed 's/$/\r/; s/\r\r$/\r/' > "$OUTPUT_FILE"
+
+        # NOTE: The "*_detail.txt" the map came with is what the engine reads
+        # WITHOUT the renderer plugin, and it points at the per-map folders
+        # under "gfx/detail" that the backup moved away. Leaving it would
+        # have the engine chase files that are not there.
+        #
+        # It is REMOVED rather than renamed because it is already inside the
+        # "*_detail.txt" tarball that "f_backup_files_n_folders" wrote before
+        # any of this ran - the same treatment the "detail" and "env" folders
+        # get. A renamed copy here would be a second one, dead, one per map.
+        # By Questor
+        DETAIL_TXT="$WORK_FOLDER_MAPS_S/${MAP_NAME}_detail.txt"
+        if [ -f "$DETAIL_TXT" ]; then
+            rm -f "$DETAIL_TXT"
+        fi
+
+        ez_i.task_stats_end TASK_STATS EXTRA_TASK
+        f_manage_logs " > Extra (\"*_extra.txt\") written: $OUTPUT_FILE
+TEXTURES: $TEXTURE_COUNT / \"SKYNAME\" SIDES: $SKY_COUNT
+REPLACES (AND REMOVES, IT IS IN THE BACKUP): ${MAP_NAME}_detail.txt
+$TASK_STATS" "o" 1
     done
-    f_clean_n_move_texture_fds
 }
 
 # < -----------------------------------------
@@ -1741,79 +1203,104 @@ $F_LONG_TASK_STATS_R" "o" 1
 # Control and manage script functions.
 # --------------------------------------
 
+f_check_requirements
+
 # > -----------------------------------------
-# Control and manage script functions.
+# Start everything over, when the configuration asks for it.
 
-USR_RESUME_PROCESS=0
-RESUME_PROCESS_MEMBERS=0
-f_manage_arrays_n_files "ck" "F_TEXTURE_N_UPSCL_FACT_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
-f_manage_arrays_n_files "ck" "F_BACKUP_FILES_N_FOLDERS_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
-f_manage_arrays_n_files "ck" "F_SKYNAME_N_UPSCL_FACT_R"
-RESUME_PROCESS_MEMBERS=$(($RESUME_PROCESS_MEMBERS+$F_MANAGE_ARRAYS_N_FILES_R))
-if [ ${RESUME_PROCESS_MEMBERS} -eq 3 ] ; then
-    f_div_section
-    f_yes_no "There is an unfinished upscale process.
-Do you want to resume the process? (\"y\" highly recommended)"
-    USR_RESUME_PROCESS=$YES_NO_R
-    if [ ${USR_RESUME_PROCESS} -eq 1 ] ; then
-        f_manage_logs " > Unfinished upscale process resumed." "o" 1
-    else
-        f_manage_logs " > Unfinished upscale process removed." "o" 1
+function f_redo_all(){
+    : 'Throw away every finished image so the whole run is made again.
+
+    REDO_ALL_S exists because each file is named after the content hash of
+    its SOURCE texture and not after the settings used to process it. Change
+    the model, the target size or the sharpening and every name stays the
+    same, so each step finds its output already there and skips it: the new
+    setting would have no effect at all, and nothing would say so.
+
+    The backups are never touched.
+    '
+
+    local DETAIL_COUNT=0
+    local ENV_COUNT=0
+    DETAIL_COUNT=$(find "$FINAL_DETAIL_DIR_S" -maxdepth 1 -type f -name "*.png" \
+        2> /dev/null | wc -l)
+    ENV_COUNT=$(find "$FINAL_ENV_DIR_S" -maxdepth 1 -type f -name "*.png" \
+        2> /dev/null | wc -l)
+
+    if [ $((DETAIL_COUNT + ENV_COUNT)) -eq 0 ] \
+        && ! ez_i.exists "" "d" "$FAILSAFE_DIR_S"; then
+        f_manage_logs " > REDO_ALL_S is on, but there was nothing to throw \
+away." "o" 1
+        return
     fi
+
+    # NOTE: Asked even though the flag is already the answer. The flag lives
+    # in a file and is easy to leave switched on, and what it costs is every
+    # image of the last run plus the hours to make them again. By Questor
+    ez_i.divider
+    ez_i.ask_yes_no "" "REDO_ALL_S is 1 in \"config.bash\", so EVERYTHING IS TO BE MADE AGAIN
+from the beginning.
+
+THIS DELETES $DETAIL_COUNT upscaled texture(s) and $ENV_COUNT upscaled \"skyname\" side(s),
+and the whole run has to be done over. YOUR BACKUPS ARE NOT TOUCHED.
+
+Answer \"n\", set REDO_ALL_S back to 0, and run again to keep what is there.
+Go ahead?" || ez_i.okay_exit "Canceled by user."
+
+    ez_i.progress "a" " > Throwing away everything already produced..."
+    rm -rf "${FINAL_DETAIL_DIR_S:?}" "${FINAL_ENV_DIR_S:?}" "${FAILSAFE_DIR_S:?}"
+    ez_i.progress "o"
+    f_manage_logs " > REDO_ALL_S is on; $DETAIL_COUNT texture(s) and $ENV_COUNT \
+\"skyname\" side(s) thrown away. Everything will be made again." "o" 1
+}
+
+if [ ${REDO_ALL_S} -eq 1 ]; then
+    f_redo_all
 fi
 
-if [ ${USR_RESUME_PROCESS} -eq 1 ] ; then
-    f_manage_arrays_n_files "rd" "F_TEXTURE_N_UPSCL_FACT_R"
-    f_manage_arrays_n_files "rd" "F_BACKUP_FILES_N_FOLDERS_R"
-    f_manage_arrays_n_files "rd" "F_SKYNAME_N_UPSCL_FACT_R"
+# < -----------------------------------------
+
+# > -----------------------------------------
+# Resume an unfinished run, or start a new one.
+
+# NOTE: The scan is the whole state of a run. Everything after it skips what
+# is already on disk, so resuming is simply not scanning again. By Questor
+USR_RESUME_PROCESS=0
+if ez_i.exists "" "f" "$SCAN_FILE_S"; then
+    ez_i.divider
+    ez_i.ask_yes_no USR_RESUME_PROCESS "There is an unfinished upscale process.
+Do you want to resume it? (\"y\" highly recommended)
+
+Resuming keeps everything already produced and carries on from there.
+Starting over rescans the maps; images already finished are still not redone."
+fi
+
+if [ ${USR_RESUME_PROCESS} -eq 1 ]; then
+    f_manage_logs " > Unfinished upscale process resumed." "o" 1
+    f_load_scan
 else
-    f_manage_arrays_n_files "rm" "F_TEXTURE_N_UPSCL_FACT_R"
-    f_manage_arrays_n_files "rm" "F_BACKUP_FILES_N_FOLDERS_R"
-    f_manage_arrays_n_files "rm" "F_SKYNAME_N_UPSCL_FACT_R"
-    f_manage_logs " > Check disk space started." "o" 1
-    f_check_disk_space
-    f_manage_logs " > Backup files and folders started." "o" 1
+    rm -rf "${FAILSAFE_DIR_S:?}"
+    f_manage_logs " > Scan started." "o" 1
+    f_scan_assets
+    f_load_scan
+    f_review_scan
+    f_manage_logs " > Backup started." "o" 1
     f_backup_files_n_folders
-    f_manage_logs " > List \"skynames\" started." "o" 1
-    f_export_bsp_entities
-    f_manage_logs " > Remove unused WADs started." "o" 1
-    f_remove_unused_wads
-    f_manage_logs " > Run Detail Texture Generator 2007 (DTG07) started." "o" 1
-    f_run_det_texture_gen_07
-    f_manage_logs " > List textures started." "o" 1
-    f_list_textures
-    f_manage_logs " > Convert TGA \"skyname\" to PNG started." "o" 1
-    f_conv_skyname_tga_to_png
-    f_manage_logs " > Convert texture BMP to PNG started." "o" 1
-    f_conv_texture_bmp_to_png
-    f_manage_logs " > Modify details (\"*_detail.txt\") started." "o" 1
-    f_adjust_details_txt
-    f_manage_logs " > Add \"skynames\" to extras (\"*_extra.txt\") started." "o" 1
-    f_add_skynames_to_extras_txt
-    f_manage_arrays_n_files "ct" "F_TEXTURE_N_UPSCL_FACT_R"
-    f_manage_logs " > Failsafe file \"F_TEXTURE_N_UPSCL_FACT_R\" created." "o" 1
-    f_manage_arrays_n_files "ct" "F_BACKUP_FILES_N_FOLDERS_R"
-    f_manage_logs " > Failsafe file \"F_BACKUP_FILES_N_FOLDERS_R\" created." "o" 1
-    f_manage_arrays_n_files "ct" "F_SKYNAME_N_UPSCL_FACT_R"
-    f_manage_logs " > Failsafe file \"F_SKYNAME_N_UPSCL_FACT_R\" created." "o" 1
-    f_manage_logs " > The script has enabled failsafe mode." "o" 1
-    f_enter_to_cont "From now this script can be interrupted (use Ctrl+c) at any time 
-and be resumed where it left off by running it again." 10
+    ez_i.enter_to_continue "From now this script can be interrupted (use Ctrl+c) at any
+time and be resumed where it left off by running it again." 10
 fi
 
-f_manage_logs " > Upscale \"skynames\" started." "o" 1
-f_upscale_skynames
-f_manage_logs " > Upscale textures started." "o" 1
-f_upscale_textures
-f_manage_logs " > Compress, move and/or resize \"skynames\" started." "o" 1
-f_compress_move_n_or_resize_skynames
-f_manage_logs " > Compress, move and/or resize \"textures\" started." "o" 1
-f_compress_move_n_or_resize_textures
-f_manage_arrays_n_files "rm" "F_TEXTURE_N_UPSCL_FACT_R"
-f_manage_arrays_n_files "rm" "F_BACKUP_FILES_N_FOLDERS_R"
-f_manage_arrays_n_files "rm" "F_SKYNAME_N_UPSCL_FACT_R"
+f_manage_logs " > Export images started." "o" 1
+f_export_images
+f_manage_logs " > Upscale images started." "o" 1
+f_upscale_images
+f_manage_logs " > Finish images started." "o" 1
+f_finish_images
+f_manage_logs " > Write extras (\"*_extra.txt\") started." "o" 1
+f_write_extra_txt
+
+# NOTE: The run is complete, so the work in progress state goes away. By Questor
+rm -rf "${FAILSAFE_DIR_S:?}"
 
 # < -----------------------------------------
 
@@ -1828,16 +1315,18 @@ f_manage_arrays_n_files "rm" "F_SKYNAME_N_UPSCL_FACT_R"
 
 F_LIST_BACKUP_FOLDERS_R=""
 function f_list_backup_folders(){
-    : 'List backup folders.'
+    : 'Build the list of backups made by this run.'
 
     local NEW_LINE=""
-    local LENGTH=${#F_BACKUP_FILES_N_FOLDERS_R[*]}
     local i=0
-    for ((i=0;i<=$(($LENGTH-1));i++)); do
-        F_LIST_BACKUP_FOLDERS_R="$F_LIST_BACKUP_FOLDERS_R$NEW_LINE${F_BACKUP_FILES_N_FOLDERS_R[$i]}"
+    for ((i=0;i<=$((${#BACKUPS_R[*]}-1));i++)); do
+        F_LIST_BACKUP_FOLDERS_R="$F_LIST_BACKUP_FOLDERS_R$NEW_LINE${BACKUPS_R[$i]}"
         NEW_LINE="
     "
     done
+    if [ -z "$F_LIST_BACKUP_FOLDERS_R" ]; then
+        F_LIST_BACKUP_FOLDERS_R="<NONE; this run resumed an earlier one>"
+    fi
     f_manage_logs " > Backup folders listed." "o" 1
 }
 
@@ -1846,28 +1335,38 @@ function f_list_backup_folders(){
 # > -----------------------------------------
 # End message.
 
-f_manage_logs " > USCS16 - UpScaler CS 1.6 finished." "o"
+f_manage_logs " > UPSCALER-CS16 - UpScaler CS 1.6 finished." "o"
 
 read -r -d '' TITLE_F << "HEREDOC"
-USCS16 - UpScaler CS 1.6 finished! Thanks!
+UPSCALER-CS16 - UpScaler CS 1.6 finished! Thanks!
 HEREDOC
 
 f_list_backup_folders
 read -r -d '' USEFUL_INFO_F << HEREDOC
+- You need Metahook Plus 0.4 with Renderer 1.5c for the detail textures to be
+ used at all.
+
 - To enable (if necessary) the detail textures type the following commands in the
  CS 1.6 console...
     r_detailtextures 1
     r_detailtexturessupported 1
     gl_max_size 16384
 
+- For the best result also set, in the same place...
+    gl_texturemode GL_LINEAR_MIPMAP_LINEAR
+
 - To definitely apply the above settings, they must be in the configurations file...
     $WORK_FOLDER_CSTRIKE_S/userconfig.cfg
+
+- Your upscaled images...
+    $FINAL_DETAIL_DIR_S
+    $FINAL_ENV_DIR_S
 
 - Your backups...
     $F_LIST_BACKUP_FOLDERS_R
 HEREDOC
 
-f_end "$TITLE_F" "$USEFUL_INFO_F"
+ez_i.end "$TITLE_F" "$USEFUL_INFO_F"
 
 # < -----------------------------------------
 

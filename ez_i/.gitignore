@@ -1,0 +1,7 @@
+# Nothing this project produces belongs in git.
+*.log
+logs/
+*_BAK
+*_BAK.*
+*_BAK_*
+__pycache__/
