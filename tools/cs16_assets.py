@@ -52,20 +52,20 @@ except ImportError as exc:  # pragma: no cover - environment problem
 # --------------------------------------
 
 # NOTE: A BSP v30 header is a version int followed by 15 (offset, length)
-# pairs. We only ever need two of those lumps. By Questor
+# pairs. We only ever need two of those lumps.
 BSP_VERSION_GOLDSRC = 30
 BSP_LUMP_COUNT = 15
 BSP_LUMP_ENTITIES = 0
 BSP_LUMP_TEXTURES = 2
 
 # NOTE: A WAD3 directory entry is 32 bytes and type 0x43 is "miptex", the only
-# type that carries a texture. By Questor
+# type that carries a texture.
 WAD3_MAGIC = b'WAD3'
 WAD3_ENTRY_SIZE = 32
 WAD3_TYPE_MIPTEX = 0x43
 
 # NOTE: A miptex is a 16 byte name, width, height and the offsets of its four
-# mip levels, all relative to the start of the miptex itself. By Questor
+# mip levels, all relative to the start of the miptex itself.
 MIPTEX_NAME_SIZE = 16
 MIPTEX_HEADER_SIZE = 40
 MIPTEX_MIP_LEVELS = 4
@@ -74,13 +74,13 @@ MIPTEX_MIP_LEVELS = 4
 # the transparent one. Reading the index is exact, which is why this code does
 # not need the "-fuzz 2% -transparent #0000ff" guess the old pipeline used -
 # that guess was needed because the key colour is not always #0000ff (in the
-# project's own sample "{ikcanopt" has (0, 0, 252)). By Questor
+# project's own sample "{ikcanopt" has (0, 0, 252)).
 MASKED_TEXTURE_PREFIX = '{'
 MASKED_PALETTE_INDEX = 255
 
 # NOTE: Textures the engine never draws. They exist for the compiler or for
 # engine behaviour, so upscaling them costs time and disk for nothing. The
-# skybox is handled separately, through "skyname". By Questor
+# skybox is handled separately, through "skyname".
 ENGINE_TEXTURES = frozenset((
     'aaatrigger', 'bevel', 'black_hidden', 'boundingbox', 'clip', 'clipbevel',
     'clipbevelbrush', 'cliphull1', 'cliphull2', 'cliphull3', 'contentempty',
@@ -151,13 +151,13 @@ def _read_miptex(buffer, offset):
     texture = {'name': name, 'width': width, 'height': height}
     if mips[0] == 0:
 
-        # NOTE: Declared by the map but stored in a WAD. By Questor
+        # NOTE: Declared by the map but stored in a WAD.
         return texture
 
     if not width or not height or width % 16 or height % 16:
 
         # NOTE: GoldSrc requires both dimensions to be multiples of 16 because
-        # of the four mip levels. Anything else is corrupt. By Questor
+        # of the four mip levels. Anything else is corrupt.
         raise AssetError(
             'texture "%s" has an invalid size (%dx%d)' % (name, width, height)
         )
@@ -168,7 +168,7 @@ def _read_miptex(buffer, offset):
         raise AssetError('texture "%s" has a truncated first mip' % name)
 
     # NOTE: The palette sits right after the smallest mip level, prefixed by
-    # its own (always 256) entry count. By Questor
+    # its own (always 256) entry count.
     palette_at = offset + mips[3] + (width // 8) * (height // 8)
     if palette_at + 2 > len(buffer):
         raise AssetError('texture "%s" has no palette' % name)
@@ -242,7 +242,7 @@ def read_bsp(path):
         for offset in offsets:
             if offset < 0:
 
-                # NOTE: -1 marks a slot the compiler left empty. By Questor
+                # NOTE: -1 marks a slot the compiler left empty.
                 continue
 
             texture = _read_miptex(buffer, textures_at + offset)
@@ -281,7 +281,7 @@ def read_wad(path):
         name = _texture_name(buffer, entry_at + 16)
 
         # NOTE: Texture names are case insensitive everywhere in GoldSrc, in
-        # the BSP, in the WAD and in the files the renderer reads. By Questor
+        # the BSP, in the WAD and in the files the renderer reads.
         entries[name.lower()] = offset
     return entries
 
@@ -311,7 +311,7 @@ def parse_entities(text):
             for item in value.split(';'):
 
                 # NOTE: These are the author's build time paths and they use
-                # either slash; only the bare name is of any use. By Questor
+                # either slash; only the bare name is of any use.
                 item = item.replace('\\', '/').strip()
                 if not item:
                     continue
@@ -355,7 +355,7 @@ def plan_upscale(width, height, factors, target_px, try_max_px):
     if needed >= biggest_factor:
 
         # NOTE: Even the largest factor will not reach "target_px". Going past
-        # it would only invent detail that is not there. By Questor
+        # it would only invent detail that is not there.
         return biggest_factor, ''
 
     exact = [f for f in factors if f == needed]
@@ -405,7 +405,6 @@ def miptex_to_png(texture, path):
         # NOTE: The masked pixels keep whatever colour the palette gave them.
         # Once alpha is 0 that colour is invisible, and leaving it alone means
         # the upscaler has no hard edge against black to ring around.
-        # By Questor
         image = Image.fromarray(np.dstack([rgb, alpha]), 'RGBA')
     else:
         image = image.convert('RGB')
@@ -552,6 +551,10 @@ def command_scan(args):
     needs), "images" (every distinct texture, by content hash) and "sky"
     (every distinct skybox side, by content hash).
 
+    WADs are read from the mod folder first and from every "--valve" folder
+    after it, which is the order the engine searches in: a WAD the mod carries
+    under a name the base game also uses is the one that counts.
+
     Args:
         args (Namespace): Parsed command line.
 
@@ -563,16 +566,32 @@ def command_scan(args):
     black_bare, black_qualified = read_black_list(args.black_list)
 
     # NOTE: Read every WAD directory once. Only the directories, which is a
-    # few hundred kilobytes even for a full "cstrike" folder. By Questor
+    # few hundred kilobytes even for a full "cstrike" folder.
+    #
+    # The mod folder FIRST and the base game ("valve") after it, which is the
+    # order the engine itself searches in - and a WAD the mod carries under a
+    # name the base game also uses WINS, exactly as it does in the game. In a
+    # stock installation "halflife.wad", "decals.wad", "liquids.wad",
+    # "xeno.wad" and "gfx.wad" live only in "valve": measured on a real
+    # installation with those taken out of "cstrike", 83 texture names across
+    # 14 of 81 maps had nowhere to come from, and "valve" answered 81 of them.
+    #
+    # And the ones a mod DOES carry are not the same files: in that same
+    # installation "cstrike/halflife.wad" is 43.8 MB against 37.9 MB in
+    # "valve", and "cstrike/xeno.wad" 29 KB against 6.5 MB. Reading them in
+    # the wrong order would hand the map a texture the engine would never use.
     wad_directory = {}
     wad_order = []
-    for path in _list_by_extension(args.cstrike, '.wad'):
-        name = os.path.splitext(os.path.basename(path))[0].lower()
-        try:
-            wad_directory[name] = (path, read_wad(path))
-            wad_order.append(name)
-        except AssetError as exc:
-            sys.stderr.write('WARNING: %s\n' % exc)
+    for folder in [args.cstrike] + list(args.valve):
+        for path in _list_by_extension(folder, '.wad'):
+            name = os.path.splitext(os.path.basename(path))[0].lower()
+            if name in wad_directory:
+                continue
+            try:
+                wad_directory[name] = (path, read_wad(path))
+                wad_order.append(name)
+            except AssetError as exc:
+                sys.stderr.write('WARNING: %s\n' % exc)
 
     wad_buffers = {}
 
@@ -626,7 +645,7 @@ def command_scan(args):
 
                 # NOTE: Named by the map but stored in a WAD. Search the WADs
                 # the map lists, in its own order, then - only if that fails -
-                # every other WAD present. By Questor
+                # every other WAD present.
                 found = []
                 for wad_name in worldspawn['wads']:
                     key = wad_name.lower()
@@ -852,6 +871,11 @@ def build_parser():
     scan = commands.add_parser('scan', help='inspect BSPs and plan the work')
     scan.add_argument('--maps', required=True, help='the "maps" folder')
     scan.add_argument('--cstrike', required=True, help='the "cstrike" folder')
+    scan.add_argument('--valve', action='append', default=[],
+                      metavar='FOLDER',
+                      help='another folder of WADs, searched after "cstrike" '
+                           '(the "valve" folder of the base game); may be '
+                           'given more than once')
     scan.add_argument('--env', default='', help='the "gfx/env" folder')
     scan.add_argument('--target-px', type=int, default=1024,
                       help='desired size of the largest dimension')

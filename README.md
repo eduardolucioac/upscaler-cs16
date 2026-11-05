@@ -65,7 +65,7 @@ upscaler-cs16/
 | **BASH 4.3+** | the libraries rely on namerefs (`local -n`) |
 | **Python 3** with **Pillow** and **NumPy** | reading BSP and WAD3, and writing the PNGs |
 | **ImageMagick** | resizing and sharpening |
-| **oxipng** | lossless PNG compression (optional, see `PNG_COMPRESS_LEVEL_S`) |
+| **oxipng** | lossless PNG compression (optional, see `PNG_COMPRESS_LEVEL`) |
 | **Real-ESRGAN ncnn/Vulkan** | the upscaling itself |
 | **A Vulkan capable GPU** | the upscalers run on it |
 
@@ -100,7 +100,7 @@ network trained on real world photographs, which is what CS 1.6 textures
 mostly are — brick, concrete, metal, wood, fabric.
 
 It is a **fixed 4x** model, so every texture is taken to 4x and resized down
-to `TARGET_MAX_PX_S`. That is not a compromise: the downscale averages away
+to `TARGET_MAX_PX`. That is not a compromise: the downscale averages away
 the artefacts the network leaves, so the result is generally **better** than
 asking for the exact factor. It is supersampling. What it costs is time, and
 peak disk for the intermediate images.
@@ -109,7 +109,7 @@ peak disk for the intermediate images.
 **anime video**. Much faster, and it takes 2, 3 and 4 as factors rather than
 only 4, but on photographic material it flattens detail. Worth it only on
 hardware that cannot afford the other, and it means changing both
-`REALESRGAN_MODEL_S` and `UPSCALE_FACTORS_S`.
+`REALESRGAN_MODEL` and `UPSCALE_FACTORS`.
 
 ### 2. The game side
 
@@ -124,8 +124,8 @@ Installing those is outside the scope of this README, and worth doing
 carefully: **back your game up first**.
 
 Tested against **CS 1.6 build 4554 (non steam)**. Your maps must already be
-working: every WAD the maps need in `cstrike`, and every skybox TGA in
-`cstrike/gfx/env`.
+working: every WAD the maps need in `cstrike` or in `valve`, and every skybox
+TGA in `cstrike/gfx/env`.
 
 Newer builds live at [MetaHookSv](https://github.com/hzqst/MetaHookSv) and
 [this guide](https://www.reddit.com/r/CS16OldModders/comments/wlhwa4/install_metahooksv_in_counterstrike_16_a_nonsteam/)
@@ -151,11 +151,17 @@ Open **`config.bash`**. Every parameter is documented inline; the only one
 you must set is the first:
 
 ```bash
-WORK_FOLDER_S="/path/to/Counter Strike 1.6/Counter Strike 1.6 RE-MOD"
+WORK_FOLDER="/path/to/Counter Strike 1.6/Counter Strike 1.6 RE-MOD"
 ```
 
 That is the folder holding the main CS 1.6 executable (`hl.exe`, for
-instance). Everything else is derived from it.
+instance). Everything else is derived from it, `WORK_FOLDER_VALVE` included:
+the WADs of the mod are read first and those of the base game after them,
+which is the order the engine searches in. In a stock installation
+`halflife.wad`, `decals.wad`, `liquids.wad`, `xeno.wad` and `gfx.wad` live
+only in `valve` — measured on a real installation with those taken out of
+`cstrike`, 83 texture names across 14 of 81 maps had nowhere to come from,
+and `valve` answered 81 of them.
 
 **IMPORTANT:** Windows folder names are case INsensitive and Linux ones are
 not. The script matches the names it reads out of the BSPs case
@@ -165,15 +171,15 @@ The ones worth knowing about:
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `REALESRGAN_MODEL_S` | `realesrgan-x4plus` | **must match `UPSCALE_FACTORS_S`** |
-| `UPSCALE_FACTORS_S` | `4` | the factors the model really accepts |
-| `TARGET_MAX_PX_S` | `1024` | size of each texture's largest dimension |
-| `TRY_MAX_PX_S` | `1` | overshoot and resize down rather than undershoot |
-| `SHARPEN_IMGS_S` | `1` | `1~3`, or `-1` to turn it off |
-| `PNG_COMPRESS_LEVEL_S` | `3` | `oxipng` level, or `-1` to skip it |
-| `RSRGAN_ENABLE_TTA_S` | `0` | up to 15% more quality for up to 8x the time |
-| `STOP_WAD_SKYNAME_MISSING_S` | `1` | stop when a map needs something no WAD has |
-| `HASH_LENGTH_S` | `16` | **changing it renames every output file** |
+| `REALESRGAN_MODEL` | `realesrgan-x4plus` | **must match `UPSCALE_FACTORS`** |
+| `UPSCALE_FACTORS` | `4` | the factors the model really accepts |
+| `TARGET_MAX_PX` | `1024` | size of each texture's largest dimension |
+| `TRY_MAX_PX` | `1` | overshoot and resize down rather than undershoot |
+| `SHARPEN_IMGS` | `1` | `1~3`, or `-1` to turn it off |
+| `PNG_COMPRESS_LEVEL` | `3` | `oxipng` level, or `-1` to skip it |
+| `RSRGAN_ENABLE_TTA` | `0` | up to 15% more quality for up to 8x the time |
+| `STOP_WAD_SKYNAME_MISSING` | `1` | stop when a map needs something no WAD has |
+| `HASH_LENGTH` | `16` | **changing it renames every output file** |
 
 ## Running it
 
@@ -214,7 +220,7 @@ finish           4m39s     <- resize, sharpen, oxipng; CPU bound
 ```
 
 The slow part is not the AI. On older hardware, or with
-`RSRGAN_ENABLE_TTA_S=1`, the same work runs for hours. Either way it is
+`RSRGAN_ENABLE_TTA=1`, the same work runs for hours. Either way it is
 interruptible; see below.
 
 ### Resuming
@@ -244,12 +250,22 @@ disk, so even starting over costs only what is actually missing.
 
 - the `detail` and `env` folders, and the `*_detail.txt` files.
 
+**Moved out of `cstrike`**, into that backup
+
+- whatever `gfx/detail` already held — the old per map detail folders, which
+  the upscaled images replace. `gfx/env` is *copied* instead, and stays.
+
 **Removed**, once its replacement is written and it is safely in that backup
 
 - `cstrike/maps/<map>_detail.txt`. It is what the engine reads *without* the
   renderer plugin, and it points at the per map folders under `gfx/detail`
   that the backup moved away, so leaving it would have the engine chase
   files that are not there.
+
+**Deleted**, but only when you ask for it
+
+- the upscaled images of an earlier run, when `REDO_ALL` is `1`. The
+  backups are never touched.
 
 **Never touched**
 
@@ -321,12 +337,12 @@ real blue pixels out of the texture.
 ## Logs
 
 Written to `logs/output/` and `logs/error/`, one timestamped file per run,
-and the last `LOGS_KEEP_S` of each are kept.
+and the last `LOGS_KEEP` of each are kept.
 
 The error log is where to look for the two things worth knowing about: a
 texture a map needs that no WAD provides, and a texture name carried by more
 than one of a map's WADs (that one goes to the output log, so you can check
-the cases that actually matter — see `WAD_LAST_WINS_S`).
+the cases that actually matter — see `WAD_LAST_WINS`).
 
 ---
 
@@ -335,15 +351,16 @@ the cases that actually matter — see `WAD_LAST_WINS_S`).
 **`find_blob_index_by_name data failed`**
 
 The model does not take the factor it was asked for, which means
-`REALESRGAN_MODEL_S` and `UPSCALE_FACTORS_S` disagree. `realesrgan-x4plus` is
+`REALESRGAN_MODEL` and `UPSCALE_FACTORS` disagree. `realesrgan-x4plus` is
 a FIXED 4x model, whatever its options suggest, so it needs
-`UPSCALE_FACTORS_S="4"`. `realesr-animevideov3` really does take 2, 3 and 4.
+`UPSCALE_FACTORS="4"`. `realesr-animevideov3` really does take 2, 3 and 4.
 
 **"There is/are texture(s) and/or `skyname` file(s) that no WAD provides"**
 
-A map needs something that is not there. The error log names each one. Put
-the missing WAD in `cstrike`, or set `STOP_WAD_SKYNAME_MISSING_S=0` to
-process everything else and leave those maps incomplete.
+A map needs something that is not there — nothing in `cstrike` and nothing in
+`valve` carries it. The error log names each one. Put the missing WAD in
+`cstrike`, or set `STOP_WAD_SKYNAME_MISSING=0` to process everything else and
+leave those maps incomplete.
 
 **Nothing changed in the game**
 
