@@ -50,6 +50,18 @@ if [ -t 0 ] && [ -t 1 ] ; then
     _EZ_I_HAS_TERMINAL=1
 fi
 
+# Whether there is a SCREEN to draw on, which is a weaker thing: only the
+# output end has to be a terminal.
+#
+# The two are not the same and conflating them hides a real case. A script
+# fed its answers from a file or a pipe has no terminal to READ from, so it
+# must not try to ask anything - but its output is still a terminal someone
+# is watching, and there is no reason to stop drawing progress on it.
+declare -i _EZ_I_HAS_SCREEN=0
+if [ -t 1 ] ; then
+    _EZ_I_HAS_SCREEN=1
+fi
+
 # Function name -> the names of its locals, each surrounded by spaces so a
 # whole word match is a plain "case" pattern. Filled once, at source time, by
 # "ez_i._scan_locals". See HANDING A VALUE BACK.

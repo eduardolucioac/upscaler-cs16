@@ -76,6 +76,79 @@ ez_i.progress "o" > /dev/null 2>&1
 t_equals "stopping twice is harmless" "0" "$_EZ_I_ANIMATION_PID"
 t_fails "an unknown action fails" ez_i.progress "x"
 
+t_group "ez_i.progress_draw and friends"
+
+# Without a terminal they are all no ops, which is the state this suite runs
+# in, so that half is checked here directly.
+t_equals "drawing without a terminal prints nothing" "" \
+    "$(ez_i.progress_draw "Label" "item" "stats")"
+t_equals "and reports success anyway" "0" \
+    "$(ez_i.progress_draw "Label" "item" "stats" > /dev/null ; echo $?)"
+t_equals "clearing when nothing was drawn is harmless" "0" \
+    "$(ez_i.progress_clear > /dev/null ; echo $?)"
+t_fails "waiting with no process id fails" ez_i.progress_wait "" "L" "I" "S"
+
+# NOTE: It still has to WAIT, terminal or not. A job that is skipped because
+# nobody is watching would be a job that never ran.
+T_START=$(($(date +%s%N) / 1000000))
+sleep 0.4 &
+ez_i.progress_wait $! "Label" "item" "stats"
+T_WAITED=$(($(($(date +%s%N) / 1000000)) - T_START))
+t_equals "it waits for the job even with nothing to draw on" "1" \
+    "$([ "$T_WAITED" -ge 350 ] && echo 1 || echo 0)"
+
+sleep 0.1 &
+ez_i.progress_wait $! "L" "I" "S"
+t_equals "and hands back the job status" "0" "$?"
+bash -c "exit 3" &
+ez_i.progress_wait $! "L" "I" "S"
+t_equals "including a failure" "3" "$?"
+
+# The two mechanisms write to the same place on screen, so whichever starts
+# second has to be refused rather than left to fight over it.
+_EZ_I_ANIMATION_PID=424242
+t_fails "drawing is refused while the animation runs" \
+    ez_i.progress_draw "Label" "item" "stats"
+_EZ_I_ANIMATION_PID=0
+_EZ_I_DRAWING=1
+t_fails "and the animation is refused while drawing" ez_i.progress "a"
+_EZ_I_DRAWING=0
+
+# NOTE: What it actually DRAWS needs a terminal, so a pty is borrowed for
+# it. Skipped, loudly, where "script" is not installed - a test that quietly
+# does not run is worse than no test.
+if command -v script > /dev/null 2>&1 ; then
+    T_DRAWN="$(script -qec "bash -c '
+        source \"$TESTS_ROOT/ez_i.bash\"
+        ez_i.progress_draw \"Converting\" \"a/b.png\" \"ITEMS LEFT 4/5\"
+        ez_i.progress_draw \"Converting\" \"a/b.png\" \"ITEMS LEFT 3/5\"
+        ez_i.progress_draw \"Converting\" \"a/b.png\" \"ITEMS LEFT 2/5\"
+        ez_i.progress_draw \"Converting\" \"a/b.png\" \"ITEMS LEFT 1/3\"
+        ez_i.progress_clear
+    '" /dev/null 2>&1 | tr '\r' '\n')"
+    case "$T_DRAWN" in
+        *"Converting: a/b.png"*) t_report 0 "with a terminal it draws the item" ;;
+        *) t_report 1 "with a terminal it draws the item" "got [$T_DRAWN]" ;;
+    esac
+    case "$T_DRAWN" in
+        *"ITEMS LEFT 1/3"*) t_report 0 "and the counters" ;;
+        *) t_report 1 "and the counters" "got [$T_DRAWN]" ;;
+    esac
+
+    # NOTE: Four calls, not two. The first two frames are deliberately the
+    # same - the bar sits empty for a moment before the word fills in - so
+    # two calls would prove nothing.
+    T_FRAMES="$(printf '%s' "$T_DRAWN" | grep -oE '\|[A-Z. ]{10}\|' | sort -u | wc -l)"
+    t_equals "each call moves the animation on" "1" \
+        "$([ "$T_FRAMES" -ge 2 ] && echo 1 || echo 0)"
+    case "$T_DRAWN" in
+        *$'\033'"[?25h"*) t_report 0 "clearing gives the cursor back" ;;
+        *) t_report 1 "clearing gives the cursor back" ;;
+    esac
+else
+    t_report 1 "a pty is needed to test the drawing (install \"script\")"
+fi
+
 t_group "ez_i.task_stats_*"
 
 declare -A T_TASK=()

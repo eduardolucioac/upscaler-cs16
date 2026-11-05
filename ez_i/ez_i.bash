@@ -105,6 +105,9 @@
 #
 #     SHOWING PROGRESS
 #     ez_i.progress <a|o> [description]
+#     ez_i.progress_draw <label> <item> <stats>
+#     ez_i.progress_wait <pid> <label> <item> <stats>
+#     ez_i.progress_clear
 #     ez_i.task_stats_init <assoc_name> <length> [increment] [start_at]
 #     ez_i.task_stats_begin <assoc_name>
 #     ez_i.task_stats_end <var_name>|- <assoc_name>
@@ -229,3 +232,8 @@ ez_i._scan_locals || return 1 2> /dev/null || exit 1
 # Keeps the "ez_i.progress" animation from being left running by an
 # unexpected error or any other way out.
 ez_i.trap_add "ez_i.progress \"o\"" SIGINT SIGTERM ERR EXIT
+
+# And the same for the in place rows, which hide the cursor while they draw.
+# "ez_i.progress_clear" does nothing when nothing was drawn, so this costs
+# nothing on a script that never uses it.
+ez_i.trap_add "ez_i.progress_clear" SIGINT SIGTERM ERR EXIT

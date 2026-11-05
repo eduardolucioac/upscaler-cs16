@@ -15,6 +15,19 @@
 
 # ANIMATION >>>>>>
 
+# The frames the "working" animation turns through. All the same width, so a
+# line redrawn in place does not jitter as the word fills in.
+declare -a _EZ_I_WORKING_FRAMES=(
+    "|          |" "|          |" "|W         |" "|WO        |"
+    "|WOR       |" "|WORK      |" "|WORKI     |" "|WORKIN    |"
+    "|WORKING   |" "|WORKING.  |" "|WORKING.. |" "|WORKING...|"
+)
+
+# Which frame "ez_i.progress_draw" shows next, and whether it has drawn
+# anything that still needs clearing.
+declare -i _EZ_I_DRAW_FRAME=0
+declare -i _EZ_I_DRAWING=0
+
 function ez_i._working_animation() {
     : 'Draw the spinner, forever, until killed.
 
@@ -24,22 +37,15 @@ function ez_i._working_animation() {
     Run in the background by "ez_i.progress" and killed by it.
     '
 
-    local -a frames=("|" "W" "O" "R" "K" "I" "N" "G" "." "." "." "|")
     local i=0
     while : ; do
-        echo -n "|          |"
-        sleep 0.2
-        printf "\r"
-        for ((i = 0; i <= 11; i++)); do
-            echo -n "${frames[$i]}"
+        for ((i = 0; i < ${#_EZ_I_WORKING_FRAMES[*]}; i++)); do
+            printf '\r%s' "${_EZ_I_WORKING_FRAMES[$i]}"
             sleep 0.2
         done
-        printf "\r"
     done
 }
 
-# [Ref(s).: https://stackoverflow.com/q/12498304/3223785 ,
-# https://stackoverflow.com/a/5722850/3223785 ]
 function ez_i.progress() {
     : 'Start or stop the "something is happening" animation.
 
@@ -70,6 +76,11 @@ function ez_i.progress() {
 
     case "$1" in
         "a")
+            if ((_EZ_I_DRAWING == 1)) ; then
+                echo "ERROR! \"ez_i.progress_draw\" is already drawing. The \
+two write to the same place on screen; clear one before starting the other." >&2
+                return 1
+            fi
             if [ -n "$2" ] ; then
                 echo "$2"
             fi
@@ -117,6 +128,146 @@ function ez_i.progress() {
 # [Ref(s).: https://stackoverflow.com/a/16908136/3223785 ,
 # https://stackoverflow.com/a/16961051/3223785 ,
 # https://askubuntu.com/a/385532/134723 ]
+function ez_i.progress_draw() {
+    : 'Say what is being worked on and how far it has got, in place.
+
+    ARGUMENTS
+        $1 - string, required. What the step is doing.
+        $2 - string, required. The item being worked on.
+        $3 - string, required. Where the loop got to, as
+             "ez_i.task_stats_end" writes it.
+
+    RETURNS
+        0 on success, 1 when "ez_i.progress" is already animating.
+
+    TWO ROWS, BOTH REWRITTEN WHERE THEY ARE, so a loop over hundreds of items
+    does not scroll everything else off the screen. The item goes on the
+    first and the counters on the second, because an animation, a label, a
+    path and the counters do not fit on one row of any ordinary terminal.
+
+    Call it REPEATEDLY: each call advances the animation by one frame, and
+    the frame is the only thing that says the work is alive. Calling it once
+    per item finished is not enough - on a slow machine an item can take many
+    seconds, and a spinner that only moves between items looks exactly like
+    one that has stopped. "ez_i.progress_wait" is the way to drive it from
+    work that is still running.
+
+    The cursor is hidden while this draws, because the terminal would
+    otherwise park it in the middle of the first row, where it blinks like a
+    mistake. "ez_i.progress_clear" puts it back, and the library traps the
+    ways out of a script so an interrupted run never leaves a terminal
+    without one.
+
+    IMPORTANT: NOT compatible with "ez_i.progress". That one animates from a
+    BACKGROUND process writing to the same place, and the two would fight
+    over it. Whichever starts second is refused.
+
+    Does nothing with EZ_I_SKIP_ON set, and nothing when the output is not a
+    terminal, so the same script stays readable in a pipe or a cron job.
+    Note that the test is on the OUTPUT only: a script reading its answers
+    from a file still has a screen worth drawing on.
+
+    EXAMPLE
+        declare -A TASK=() ; declare STATS=""
+        ez_i.task_stats_init TASK "${#FILES[@]}"
+        for FILE in "${FILES[@]}" ; do
+            ez_i.task_stats_begin TASK
+            convert_it "$FILE" &
+            ez_i.progress_wait $! "Converting" "$FILE" "$STATS"
+            ez_i.task_stats_end STATS TASK
+        done
+        ez_i.progress_clear
+    '
+
+    ((EZ_I_SKIP_ON == 1)) && return 0
+
+    # NOTE: Checked BEFORE the terminal is, so that using the two together is
+    # reported wherever it happens and not only where it would show. A
+    # mistake that only surfaces on a machine with a terminal is a mistake
+    # found by a user rather than by the author. By Questor
+    if ((_EZ_I_ANIMATION_PID > 0)) ; then
+        echo "ERROR! \"ez_i.progress\" is already animating. The two write to \
+the same place on screen; stop one before starting the other." >&2
+        return 1
+    fi
+    ((_EZ_I_HAS_SCREEN == 0)) && return 0
+
+    local label=$1
+    local item=$2
+    local stats=$3
+
+    _EZ_I_DRAWING=1
+
+    # NOTE: "\033[?25l" hides the cursor, "\033[K" wipes what a previous and
+    # longer line left behind, and "\033[1A" goes back up to the first of the
+    # two rows - followed by "\r", because going up a line does not go back
+    # to the first column.
+    printf '\033[?25l\r\033[K %s %s: %s\n\r\033[K%s\033[1A\r' \
+        "${_EZ_I_WORKING_FRAMES[$_EZ_I_DRAW_FRAME]}" "$label" "$item" "$stats"
+    _EZ_I_DRAW_FRAME=$(((_EZ_I_DRAW_FRAME + 1) % ${#_EZ_I_WORKING_FRAMES[*]}))
+    return 0
+}
+
+function ez_i.progress_clear() {
+    : 'Wipe both rows and give the cursor back.
+
+    RETURNS
+        0 always.
+
+    Harmless when nothing was drawn, which is what lets the library trap it
+    on the ways out of a script.
+    '
+
+    ((_EZ_I_DRAWING == 0)) && return 0
+    _EZ_I_DRAWING=0
+    ((_EZ_I_HAS_SCREEN == 0)) && return 0
+    printf '\r\033[K\n\r\033[K\033[1A\r\033[?25h'
+    return 0
+}
+
+function ez_i.progress_wait() {
+    : 'Wait for a background job, keeping the two rows moving while it runs.
+
+    ARGUMENTS
+        $1 - integer, required. The process id to wait for.
+        $2 - string, required. What the step is doing.
+        $3 - string, required. The item being worked on.
+        $4 - string, required. Where the loop got to.
+
+    RETURNS
+        The job'"'"'s exit status, or 1 when no process id was given.
+
+    This is what makes the animation turn DURING the work rather than
+    between items. Drawing and working cannot be the same thing: while a
+    foreground command runs, nothing redraws. So the work goes into the
+    background and this waits for it, drawing as it goes.
+
+    IMPORTANT: a job in the background cannot stop the calling script. Where
+    the work would normally exit on failure, CHECK WHAT THIS RETURNS.
+
+    With nothing to draw on it simply waits, with no polling.
+    '
+
+    local job_pid=$1
+    local label=$2
+    local item=$3
+    local stats=$4
+
+    if [ -z "$job_pid" ] ; then
+        echo "ERROR! A process id is required." >&2
+        return 1
+    fi
+    if ((EZ_I_SKIP_ON == 1)) || ((_EZ_I_HAS_SCREEN == 0)) ; then
+        wait "$job_pid"
+        return
+    fi
+    while kill -0 "$job_pid" 2> /dev/null ; do
+        ez_i.progress_draw "$label" "$item" "$stats"
+        sleep 0.2
+    done
+    wait "$job_pid"
+}
+
 function ez_i.task_stats_init() {
     : 'Set up the counters for a loop.
 
