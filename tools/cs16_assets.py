@@ -70,6 +70,10 @@ MIPTEX_NAME_SIZE = 16
 MIPTEX_HEADER_SIZE = 40
 MIPTEX_MIP_LEVELS = 4
 
+# NOTE: Always this many, in every miptex ever written. It is what makes it
+# possible to tell a palette from whatever else a bad offset points at.
+MIPTEX_PALETTE_COLOURS = 256
+
 # NOTE: A texture whose name starts with "{" is masked: palette index 255 is
 # the transparent one. Reading the index is exact, which is why this code does
 # not need the "-fuzz 2% -transparent #0000ff" guess the old pipeline used -
@@ -168,14 +172,45 @@ def _read_miptex(buffer, offset):
         raise AssetError('texture "%s" has a truncated first mip' % name)
 
     # NOTE: The palette sits right after the smallest mip level, prefixed by
-    # its own (always 256) entry count.
-    palette_at = offset + mips[3] + (width // 8) * (height // 8)
-    if palette_at + 2 > len(buffer):
-        raise AssetError('texture "%s" has no palette' % name)
-    palette_size, = struct.unpack_from('<H', buffer, palette_at)
-    palette = buffer[palette_at + 2:palette_at + 2 + palette_size * 3]
-    if len(palette) != palette_size * 3:
-        raise AssetError('texture "%s" has a truncated palette' % name)
+    # its own entry count, which is ALWAYS 256.
+    #
+    # Where that is comes from the DIMENSIONS and not from "mips[3]". The
+    # four levels are laid out contiguously after the 40 byte header, so the
+    # two agree in a well formed miptex - and where they disagree, it is
+    # "mips[3]" that is wrong. Maps edited by texture replacing tools carry
+    # offsets left over from a different layout: in one map of this
+    # project's own collection, 9 of 53 textures point "mips[3]" into the
+    # middle of nowhere, giving palettes of 37299 or 57519 colours that
+    # Pillow then refuses with "invalid palette size". Read from the
+    # dimensions, all 53 come back with the 256 they should have.
+    #
+    # "mips[3]" is still tried as a fallback, for the opposite case: a file
+    # with padding between the levels, which the dimensions would not
+    # account for. Whichever yields 256 wins.
+    def _palette_at(position):
+        if position + 2 > len(buffer):
+            return None
+        count, = struct.unpack_from('<H', buffer, position)
+        if count != MIPTEX_PALETTE_COLOURS:
+            return None
+        colours = buffer[position + 2:position + 2 + count * 3]
+        if len(colours) != count * 3:
+            return None
+        return colours
+
+    palette = _palette_at(
+        offset + MIPTEX_HEADER_SIZE + width * height
+        + (width // 2) * (height // 2)
+        + (width // 4) * (height // 4)
+        + (width // 8) * (height // 8)
+    )
+    if palette is None:
+        palette = _palette_at(offset + mips[3] + (width // 8) * (height // 8))
+    if palette is None:
+        raise AssetError(
+            'texture "%s" has no readable palette; it is neither where its '
+            'size says nor where its mip offsets say' % name
+        )
 
     texture['indices'] = indices
     texture['palette'] = palette
@@ -847,7 +882,13 @@ def command_export(args):
             return 1
         written += 1
 
-    sys.stdout.write('%d written, %d already finished\n' % (written, done))
+    # NOTE: The "already finished" half is only said when there IS one. On a
+    # first run it is always zero, and a zero that can never be anything else
+    # is noise in the one line the user reads.
+    if done:
+        sys.stdout.write('%d written, %d already finished\n' % (written, done))
+    else:
+        sys.stdout.write('%d written\n' % written)
     return 0
 
 

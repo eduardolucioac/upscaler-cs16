@@ -1,3 +1,8 @@
+# Your own settings, copied from "config_model.bash". Not tracked: a pull
+# must never overwrite your paths, and your paths must never reach a commit.
+# The TEMPLATE is what git carries.
+/config.bash
+
 # Work in progress of an unfinished run. It is rebuilt from the maps and
 # carries no information the scan cannot produce again.
 __FAILSAFE__/
@@ -8,6 +13,13 @@ logs/
 # Python bytecode cache, rebuilt on every run.
 __pycache__/
 *.pyc
+
+# Backup copies, the way "ez_smb_sync" does it. "images/upscaler-cs16_BAK.png"
+# is the art before it was resized: 417 KB that no README points at, and
+# neither sibling project carries an equivalent.
+*_BAK
+*_BAK.*
+*.bak
 
 # Editor and desktop leftovers.
 .vscode/

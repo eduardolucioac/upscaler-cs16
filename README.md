@@ -1,8 +1,10 @@
 # upscaler-cs16
 
+![upscaler-cs16](./images/upscaler-cs16.png)
+
 Upscale the textures of your **Counter-Strike 1.6** maps. Point it at your
 game folder, leave it running, and every map comes back with textures at up
-to 1024 px instead of the 256 px or so they shipped with.
+to 1024 px and with much better detail and resolution.
 
 ```sh
 ./upscaler-cs16.bash
@@ -43,13 +45,15 @@ and are upscaled once however many maps share them.
 ```
 upscaler-cs16/
 ├── upscaler-cs16.bash      # run this
-├── config.bash             # your settings — read it before the first run
+├── config_model.bash       # the settings template, tracked by git
+├── config.bash             # YOURS, copied from the template; not tracked
 ├── tools/
 │   └── cs16_assets.py          # the native BSP and WAD3 reader
 ├── black_list.txt          # textures that must never be replaced
 ├── ez_i/                   # github.com/eduardolucioac/ez_i
 ├── json-like/              # github.com/eduardolucioac/json-like
 ├── logs/                   # written as it runs
+├── images/
 ├── LICENSE
 └── README.md               # this file
 ```
@@ -140,12 +144,23 @@ works against them is **untested**. Use the versions named above.
 git clone https://github.com/eduardolucioac/upscaler-cs16.git
 cd upscaler-cs16
 chmod a+x upscaler-cs16.bash
+cp config_model.bash config.bash
 ```
 
 The two libraries under `ez_i/` and `json-like/` come with it. Nothing is
 compiled and nothing else is downloaded.
 
+**That last line is not optional.** The script will not run without a
+`config.bash`, and it says so rather than starting with every setting
+empty.
+
 ## Configuration
+
+`config.bash` is **yours**. It is not part of the project and git does not
+track it, so pulling a new version never overwrites your paths and your
+paths never end up in a commit. What the project carries is
+`config_model.bash`, which is also where a new setting shows up — compare
+the two after an update to see what changed.
 
 Open **`config.bash`**. Every parameter is documented inline; the only one
 you must set is the first:
@@ -384,19 +399,15 @@ Each library carries its own:
 
 ## Limitations
 
-- **Linux only**, and GoldSrc **BSP version 30** only.
 - **Results depend on your maps.** Very small or poor source textures will
   not improve much. Do not expect a miracle — expect better definition and
   clarity in general, and a few textures that need a manual touch.
-- **Metahook Plus 0.4 and Meta Renderer 1.5c** are required for any of this
-  to show up in game. Newer MetaHook builds may work and are untested.
-- **Disk.** 0.44 GB of finished textures for the five map sample, measured;
-  scale from there. **Peak** use is higher, because every texture passes
-  through a 4x intermediate before being resized down.
 
 ## About
 
 upscaler-cs16 🄯 BSD-3-Clause  
 Eduardo Lúcio Amorim Costa  
-Brazil-DF  
+Brazil-ES  
 https://www.linkedin.com/in/eduardo-software-livre/
+
+![Brazil](./images/brazil.png)

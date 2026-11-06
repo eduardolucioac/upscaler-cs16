@@ -1,6 +1,15 @@
 #!/bin/bash
 
-# upscaler-cs16 - UpScaler CS 1.6 - configuration.
+# upscaler-cs16 - UpScaler CS 1.6 - configuration TEMPLATE.
+#
+# COPY THIS FILE TO "config.bash" AND EDIT THAT ONE:
+#
+#     cp config_model.bash config.bash
+#
+# "config.bash" is yours and is not tracked by git, so pulling a new version
+# of this project never overwrites your paths, and your paths never end up
+# in a commit. This template is what git carries, and what a new setting is
+# added to - compare the two after an update to see what is new.
 #
 # IMPORTANT: Windows folder paths are case INsensitive, Linux ones are NOT.
 # The script itself matches the names it reads out of the BSPs case
@@ -11,7 +20,8 @@
 # --------------------------------------
 
 # NOTE: Folder containing the main CS 1.6 executable ("hl.exe", for example).
-WORK_FOLDER="/home/eduardolac/Data0/_PERSONAL/_CSREMOD/CS_WORKING_FOLDERS/_UPSCALE_IMAGES/_TEST/Counter Strike 1.6 RE-MOD v1.5.0b/Counter Strike 1.6 RE-MOD"
+# WORK_FOLDER="/home/eduardolac/Data0/_PERSONAL/_CSREMOD/CS_WORKING_FOLDERS/_UPSCALE_IMAGES/_TEST/Counter Strike 1.6 RE-MOD v1.5.0b/Counter Strike 1.6 RE-MOD"
+WORK_FOLDER="/path/to/your/Counter Strike 1.6"
 
 # NOTE: Everything below is relative to the one above and should not normally
 # need changing.
@@ -123,9 +133,18 @@ PNG_COMPRESS_LEVEL=3
 # cannot be resumed under another.
 HASH_LENGTH=16
 
-# NOTE: Stop if a map needs a texture no WAD provides, or a "skyname" side
-# that is not in "gfx/env". Turn it off to process what is there and have the
-# rest listed in the error log (1 - ON/0 - OFF).
+# NOTE: Ask what to do when a map needs a texture no WAD provides, or a
+# "skyname" side that is not in "gfx/env" (1 - ASK/0 - CARRY ON QUIETLY).
+#
+# Either way EVERY missing name goes to the error log, and either way the
+# rest of the run goes ahead: the maps that need them simply keep the
+# textures they have now.
+#
+# A map works perfectly well without every WAD its "wad" key lists - those
+# are the author's build time paths, and most of what they name is embedded
+# in the BSP or unused - so this is usually worth knowing and not worth
+# stopping for. Turn it off once you have read the log and decided the names
+# do not matter.
 STOP_WAD_SKYNAME_MISSING=1
 
 # NOTE: Textures the engine never draws (CLIP, AAATRIGGER, SKY, ORIGIN and so

@@ -27,6 +27,24 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 . "$SCRIPT_DIR/json-like/json-like.bash"
 
 # NOTE: Load configurations.
+#
+# "config.bash" is the user's own and is deliberately NOT part of this
+# project: it holds paths that belong to one machine. What the project
+# carries is "config_model.bash", to be copied once.
+#
+# Checked rather than assumed, because sourcing a file that is not there
+# does not stop BASH: it carries on with every setting empty, and what the
+# user sees is a stream of "is not a number of logs to keep" instead of the
+# one sentence that would have fixed it. By Questor
+if [ ! -f "$SCRIPT_DIR/config.bash" ]; then
+    echo "ERROR! There is no \"config.bash\" in \"$SCRIPT_DIR\".
+
+Copy the template and set your game folder in it:
+
+    cp \"$SCRIPT_DIR/config_model.bash\" \"$SCRIPT_DIR/config.bash\"
+" >&2
+    exit 1
+fi
 . "$SCRIPT_DIR/config.bash"
 
 
@@ -668,7 +686,7 @@ $images distinct image(s) and $sky distinct \"skyname\" side(s). \
 $blacklisted blacklisted, $unresolved unresolved, $sky_missing \"skyname\" side(s) missing." "o" 1
 
     ez_i.divider
-    ez_i.ask_yes_no "" "Your $maps map(s) use $refs textures, which are only $images DISTINCT
+    ez_i.ask_yes_no "" "Your $maps map(s) use $refs textures, which $images are DISTINCT
 images (plus $sky distinct \"skyname\" sides). Each distinct image is upscaled
 once, so that is all the work there is.
 
@@ -716,14 +734,35 @@ MAP: $map_name" "e"
         done
     done
 
+    # NOTE: ASKED, not refused. A map works perfectly well without every WAD
+    # its "wad" key lists - those are the author'"'"'s build time paths, and most
+    # of what they name is either embedded in the BSP or simply unused. A
+    # name nothing provides usually means one texture of one map keeps the
+    # one it has now, which is worth being TOLD and is not worth refusing to
+    # run over.
+    #
+    # Nobody to answer means NO: an incomplete map is not something to be
+    # agreed to by an empty terminal. By Questor
     if [ ${problems} -eq 1 ] && [ ${STOP_WAD_SKYNAME_MISSING} -eq 1 ]; then
-        f_fail "There is/are texture(s) and/or \"skyname\" file(s) that no WAD and
-no \"gfx/env\" provides. The maps that need them would come out incomplete.
+        ez_i.divider
+        ez_i.ask_yes_no "" "There is/are texture(s) and/or \"skyname\" file(s) that no WAD and
+no \"gfx/env\" provides. EVERY ONE OF THEM IS LISTED IN THE ERROR LOG.
 
-Set STOP_WAD_SKYNAME_MISSING=0 in \"config.bash\" to process everything
-else anyway and leave these out.
+The maps that need them come out incomplete: those textures keep the ones
+they have now, and everything else is still upscaled. If all your maps load
+and look right as they are, the names are very likely unused and this costs
+you nothing.
+
+ERROR_LOG: $ERROR_LOG_FILE
+
+Carry on anyway?" "" 0 \
+            || f_fail "Stopped because of the missing texture(s) and/or \"skyname\" file(s).
+
+Set STOP_WAD_SKYNAME_MISSING=0 in \"config.bash\" to stop being asked.
 
 ERROR_LOG: $ERROR_LOG_FILE"
+        f_manage_logs " > Missing texture(s)/\"skyname\" file(s) accepted by \
+the user; the maps that need them will be incomplete." "o" 1
     fi
 }
 
@@ -1540,8 +1579,7 @@ function f_redo_all(){
     extra_count=$(find "$WORK_FOLDER_MAPS" -maxdepth 1 -type f \
         -iname "*_extra.txt" 2> /dev/null | wc -l)
 
-    if [ $((detail_count + env_count + extra_count)) -eq 0 ] \
-        && ! ez_i.exists "" "d" "$FAILSAFE_DIR"; then
+    if [ $((detail_count + env_count + extra_count)) -eq 0 ]; then
         f_manage_logs " > REDO_ALL is on, but there was nothing to throw \
 away." "o" 1
         return
@@ -1562,7 +1600,10 @@ Answer \"n\", set REDO_ALL back to 0, and run again to keep what is there.
 Go ahead?" || ez_i.okay_exit "Canceled by user."
 
     ez_i.progress "a" " > Throwing away everything already produced..."
-    rm -rf "${FINAL_DETAIL_DIR:?}" "${FINAL_ENV_DIR:?}" "${FAILSAFE_DIR:?}"
+    # NOTE: The failsafe is NOT touched. By the time this runs it holds the
+    # scan this very run just made, and the fresh start already removed any
+    # older one. By Questor
+    rm -rf "${FINAL_DETAIL_DIR:?}" "${FINAL_ENV_DIR:?}"
 
     # NOTE: The "*_extra.txt" go too. They are skipped when they already
     # exist, like everything else this script makes, so this is the only
@@ -1576,9 +1617,6 @@ Go ahead?" || ez_i.okay_exit "Canceled by user."
 will be made again." "o" 1
 }
 
-if [ ${REDO_ALL} -eq 1 ]; then
-    f_redo_all
-fi
 
 # < -----------------------------------------
 
@@ -1588,7 +1626,10 @@ fi
 # NOTE: The scan is the whole state of a run. Everything after it skips what
 # is already on disk, so resuming is simply not scanning again.
 RESUME_PROCESS=0
-if ez_i.exists "" "f" "$SCAN_FILE"; then
+
+# NOTE: With REDO_ALL on there is nothing to resume - starting over is the
+# whole point - so the question is not even put. By Questor
+if [ ${REDO_ALL} -eq 0 ] && ez_i.exists "" "f" "$SCAN_FILE"; then
     ez_i.divider
     ez_i.ask_yes_no RESUME_PROCESS "There is an unfinished upscale process.
 Do you want to resume it? (\"y\" highly recommended)
@@ -1606,6 +1647,15 @@ else
     f_scan_assets
     f_load_scan
     f_review_scan
+
+    # NOTE: Here, and not before the scan. Throwing the last run away is the
+    # most destructive thing this script does, and until the scan has run
+    # there is no telling whether this one can go ahead at all: a missing
+    # WAD or a refused disk estimate stops it. Doing it earlier would
+    # destroy a finished run and then abort, leaving nothing. By Questor
+    if [ ${REDO_ALL} -eq 1 ]; then
+        f_redo_all
+    fi
     f_manage_logs " > Backup started." "o" 1
     f_backup_files_n_folders
     ez_i.enter_to_continue "From now this script can be interrupted (use Ctrl+c) at any
