@@ -20,7 +20,8 @@
 # --------------------------------------
 
 # NOTE: Folder containing the main CS 1.6 executable ("hl.exe", for example).
-# WORK_FOLDER="/home/eduardolac/Data0/_PERSONAL/_CSREMOD/CS_WORKING_FOLDERS/_UPSCALE_IMAGES/_TEST/Counter Strike 1.6 RE-MOD v1.5.0b/Counter Strike 1.6 RE-MOD"
+# THIS IS THE ONE SETTING YOU HAVE TO CHANGE. Everything else below is
+# derived from it and has a sensible default.
 WORK_FOLDER="/path/to/your/Counter Strike 1.6"
 
 # NOTE: Everything below is relative to the one above and should not normally
