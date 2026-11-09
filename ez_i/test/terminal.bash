@@ -149,6 +149,86 @@ else
     t_report 1 "a pty is needed to test the drawing (install \"script\")"
 fi
 
+t_group "ez_i.sound"
+
+t_fails "an unknown kind is refused" ez_i.sound "cheerful"
+t_fails "and so is no kind at all" ez_i.sound ""
+t_equals "a known kind is accepted" "0" "$(ez_i.sound "success" ; echo $?)"
+
+# NOTE: The longest of the three runs for about a second, and the one just
+# made above is still going. Waiting for quiet first is what makes the
+# count below mean anything.
+sleep 2
+T_QUIET="$(pgrep -xc speaker-test 2> /dev/null || echo 0)"
+
+# It must not hold the script up: the sound outlives the call.
+T_START=$(($(date +%s%N) / 1000000))
+ez_i.sound "error"
+t_equals "it returns at once" "1" \
+    "$([ $(($(($(date +%s%N) / 1000000)) - T_START)) -lt 200 ] && echo 1 || echo 0)"
+
+# NOTE: "speaker-test" IGNORES SIGTERM, so the library kills it with -9.
+# Were that ever softened, the tone would play for ever and every call
+# would leak one. This waits out the longest of the three and checks that
+# nothing is left running.
+sleep 2
+t_equals "no tone is left playing" "$T_QUIET" \
+    "$(pgrep -xc speaker-test 2> /dev/null || echo 0)"
+
+t_group "ez_i.notify and its three faces"
+
+t_fails "an unknown kind of message is refused" ez_i.notify "cheerful" "Hello."
+
+# NOTE: Shown even with EZ_I_SKIP_ON set - that flag means nobody is there
+# to ANSWER, not "say nothing". What it drops is the waiting.
+EZ_I_SKIP_ON=1
+T_OUT="$(ez_i.notify "success" "It worked." 2>&1)"
+case "$T_OUT" in
+    *"S U C C E S S !"*"It worked."*) t_report 0 "a message is shown under EZ_I_SKIP_ON" ;;
+    *) t_report 1 "a message is shown under EZ_I_SKIP_ON" "got [$T_OUT]" ;;
+esac
+
+# Each face heads its message with its own kind.
+for T_PAIR in "success:S U C C E S S !" "warning:W A R N I N G !" "error:E R R O R !" ; do
+    T_KIND="${T_PAIR%%:*}"
+    T_TITLE="${T_PAIR#*:}"
+    T_OUT="$(ez_i.$T_KIND "Something happened." 2>&1)"
+    case "$T_OUT" in
+        *"$T_TITLE"*) t_report 0 "ez_i.$T_KIND heads it \"$T_TITLE\"" ;;
+        *) t_report 1 "ez_i.$T_KIND heads it \"$T_TITLE\"" "got [$T_OUT]" ;;
+    esac
+done
+
+# How the message is left on screen: ask, wait, or neither.
+T_OUT="$(ez_i.notify "warning" "Careful." -1 2>&1)"
+case "$T_OUT" in
+    *"Press enter"*|*"CONTINUE?"*) t_report 1 "-1 does not wait" "got [$T_OUT]" ;;
+    *"W A R N I N G !"*) t_report 0 "-1 shows the message and does not wait" ;;
+    *) t_report 1 "-1 shows the message and does not wait" "got [$T_OUT]" ;;
+esac
+
+# NOTE: Anything that is not one of the three is REFUSED, and refused
+# before a word is printed. Taking it for the default is how a message
+# meant to stop a run silently stops nothing.
+t_fails "a way to wait that is not -1, 0 or 1 is refused" \
+    ez_i.notify "warning" "Careful." 2
+T_OUT="$(ez_i.notify "warning" "SHOULD NOT APPEAR" 2 2>&1)"
+case "$T_OUT" in
+    *"SHOULD NOT APPEAR"*) t_report 1 "and nothing is printed when it is" ;;
+    *) t_report 0 "and nothing is printed when it is" ;;
+esac
+
+# The sound is asked for with a 1 and is the one of the kind, which is why
+# there is no kind to pass and no wrong kind to pass.
+ez_i.error "Something broke." 0 1 > /dev/null 2>&1
+t_equals "ez_i.error sounds on a 1" "0" "$?"
+ez_i.success "All good." 0 0 > /dev/null 2>&1
+t_equals "and says nothing on a 0" "0" "$?"
+EZ_I_SKIP_ON=0
+sleep 2
+t_equals "neither leaves a tone playing" "$T_QUIET" \
+    "$(pgrep -xc speaker-test 2> /dev/null || echo 0)"
+
 t_group "ez_i.task_stats_*"
 
 declare -A T_TASK=()

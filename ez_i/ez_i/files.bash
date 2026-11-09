@@ -29,7 +29,7 @@ function ez_i.exists() {
     file is not a directory.
 
     EXAMPLE
-        ez_i.exists "" "d" "$TARGET" || ez_i.error_exit "No target folder!"
+        ez_i.exists "" "d" "$TARGET" || ez_i.fail_exit "No target folder!"
 
         declare IS_THERE
         ez_i.exists IS_THERE "f" "$CONFIG"

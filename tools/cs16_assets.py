@@ -29,6 +29,7 @@ Eduardo Lucio Amorim Costa
 """
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -215,6 +216,24 @@ def _read_miptex(buffer, offset):
     texture['indices'] = indices
     texture['palette'] = palette
     return texture
+
+
+def _is_fully_masked(texture):
+    """Say whether every pixel of a texture is the transparent index.
+
+    Args:
+        texture (dict): A miptex, which may have no pixels of its own.
+
+    Returns:
+        bool: True when the texture is masked and draws nothing at all.
+    """
+    if not texture['name'].startswith(MASKED_TEXTURE_PREFIX):
+        return False
+    indices = texture.get('indices')
+    if not indices:
+        return False
+    return bool((np.frombuffer(indices, dtype=np.uint8)
+                 == MASKED_PALETTE_INDEX).all())
 
 
 def content_hash(texture, length):
@@ -417,6 +436,54 @@ def plan_upscale(width, height, factors, target_px, try_max_px):
 # Image writing.
 # --------------------------------------
 
+def _bleed_colour_outwards(rgb, alpha, passes=4):
+    """Push the colour of visible pixels into the invisible ones around them.
+
+    Known as alpha bleeding. Each pass gives every fully transparent pixel
+    the average colour of whichever of its four neighbours are already
+    carrying one, so the visible colour spreads outwards a ring at a time.
+
+    Args:
+        rgb (ndarray): Height x width x 3, uint8.
+        alpha (ndarray): Height x width, uint8. 0 is transparent.
+        passes (int): How many rings to fill. Four is more than an upscaler
+    reaches across.
+
+    Returns:
+        ndarray: The colours, with the transparent ones replaced.
+    """
+    out = rgb.astype(np.float32).copy()
+    known = (alpha > 0)
+    if not known.any() or known.all():
+        return rgb
+
+    for _ in range(passes):
+        if known.all():
+            break
+        total = np.zeros_like(out)
+        count = np.zeros(known.shape, dtype=np.float32)
+        for axis, shift in ((0, 1), (0, -1), (1, 1), (1, -1)):
+            shifted_rgb = np.roll(out, shift, axis=axis)
+            shifted_known = np.roll(known, shift, axis=axis)
+
+            # NOTE: "np.roll" wraps around, so the row or column that came
+            # from the far side is not a neighbour and is dropped.
+            edge = [slice(None)] * 2
+            edge[axis] = 0 if shift > 0 else -1
+            shifted_known = shifted_known.copy()
+            shifted_known[tuple(edge)] = False
+
+            total += shifted_rgb * shifted_known[..., None]
+            count += shifted_known
+        fillable = (~known) & (count > 0)
+        if not fillable.any():
+            break
+        out[fillable] = total[fillable] / count[fillable][..., None]
+        known = known | fillable
+
+    return out.round().astype(np.uint8)
+
+
 def miptex_to_png(texture, path):
     """Write a miptex out as a PNG.
 
@@ -437,9 +504,22 @@ def miptex_to_png(texture, path):
         alpha = np.where(indices == MASKED_PALETTE_INDEX, 0, 255).astype(np.uint8)
         rgb = np.array(image.convert('RGB'))
 
-        # NOTE: The masked pixels keep whatever colour the palette gave them.
-        # Once alpha is 0 that colour is invisible, and leaving it alone means
-        # the upscaler has no hard edge against black to ring around.
+        # NOTE: The colour UNDER the transparent pixels is pushed outwards
+        # from the visible ones before anything is upscaled.
+        #
+        # Those pixels hold the key colour, which in every masked texture of
+        # this project's own collection is pure blue (0, 0, 255). Alpha hides
+        # it, but an upscaler does not work on alpha alone: it interpolates
+        # the COLOUR channels across the edge, so a pixel that ends up half
+        # visible is mixed half with that blue. The result is the blue fringe
+        # around ladders, grates and foliage - and the same in red or green
+        # wherever the key colour happens to be something else.
+        #
+        # Replacing the hidden colour with the nearest visible one leaves the
+        # interpolation nothing wrong to mix in. It changes no pixel anyone
+        # can see: alpha is untouched, and every pixel written here was
+        # already invisible. By Questor
+        rgb = _bleed_colour_outwards(rgb, alpha)
         image = Image.fromarray(np.dstack([rgb, alpha]), 'RGBA')
     else:
         image = image.convert('RGB')
@@ -645,8 +725,15 @@ def command_scan(args):
     sky_images = {}
     ambiguous = []
 
+    # NOTE: "--only" exists so a change can be judged on ONE map before it is
+    # let loose on a whole collection. Upscaling 81 maps is hours; upscaling
+    # "fy_factory" to see whether a fix worked is a couple of minutes.
+    wanted = [p.strip().lower() for p in (args.only or '').split(',') if p.strip()]
+
     for bsp_path in _list_by_extension(args.maps, '.bsp'):
         bsp_name = os.path.splitext(os.path.basename(bsp_path))[0]
+        if wanted and not any(fnmatch.fnmatch(bsp_name.lower(), p) for p in wanted):
+            continue
         try:
             entity_text, textures = read_bsp(bsp_path)
         except AssetError as exc:
@@ -664,6 +751,7 @@ def command_scan(args):
             'unresolved': [],
             'sky': [],
             'sky_missing': [],
+            'fully_masked': [],
         }
 
         # > ----- textures -----
@@ -717,6 +805,28 @@ def command_scan(args):
 
             if (source_name, name.lower()) in black_qualified:
                 entry['blacklisted'].append('%s/%s' % (source_name, name))
+                continue
+
+            # NOTE: A texture that is ENTIRELY the mask index draws nothing.
+            # These are the "invisible but solid" brushes - "{blue",
+            # "{invisible", "{null", "{nosee" and the rest - used for
+            # ladders, clip volumes and light sources.
+            #
+            # Replacing them is worse than pointless. There is nothing in
+            # them to upscale, and what comes out the other end is a black
+            # PNG: ImageMagick works on PREMULTIPLIED alpha, so resizing an
+            # image whose alpha is zero everywhere takes its colour to zero
+            # too, and the renderer then draws a black surface where the map
+            # author wanted to see straight through. That is the black crate
+            # in "de_quarry".
+            #
+            # Recognised rather than left to the black list. The names vary
+            # from map to map, a black list entry is tied to one source, and
+            # a texture embedded in a BSP is a different source from the
+            # same name in a WAD - which is exactly how "halflife/{blue"
+            # being on the list still let "de_quarry" come out black.
+            if _is_fully_masked(texture):
+                entry['fully_masked'].append(name)
                 continue
 
             digest = content_hash(texture, args.hash_length)
@@ -786,6 +896,7 @@ def command_scan(args):
             'images': len(images),
             'sky': len(sky_images),
             'blacklisted': sum(len(m['blacklisted']) for m in maps.values()),
+            'fully_masked': sum(len(m['fully_masked']) for m in maps.values()),
             'unresolved': sum(len(m['unresolved']) for m in maps.values()),
             'sky_missing': sum(len(m['sky_missing']) for m in maps.values()),
         },
@@ -933,6 +1044,9 @@ def build_parser():
     scan.add_argument('--wad-last-wins', action='store_true',
                       help='on a name carried by several WADs take the last, '
                            'not the first, of the ones the map lists')
+    scan.add_argument('--only', default='',
+                      help='comma separated map names, globs allowed, to scan '
+                           'instead of every map in the folder')
     scan.add_argument('--indent', type=int, default=0,
                       help='JSON indentation, 0 for none')
     scan.set_defaults(handler=command_scan)

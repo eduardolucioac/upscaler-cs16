@@ -1,4 +1,15 @@
-de_fog/{svet_low
-de_rex/rex_wall02
-halflife/{blue
-halflife/{invisible
+# upscaler-cs16 - textures that must never be replaced.
+#
+# One per line. "map_or_wad/name" blocks it only when it comes from that
+# source; a bare "name" blocks it everywhere. Lines starting with "#" and
+# empty ones are ignored.
+#
+# NOTE: Textures that are ENTIRELY transparent do not belong here. The
+# scanner recognises them on its own - "{blue", "{invisible", "{null" and
+# the rest - because the name varies from map to map and an entry here is
+# tied to one source, so the same name embedded in a BSP would slip past an
+# entry written for a WAD. This list is for textures that DO draw something
+# and that you would rather keep as they are.
+
+# Upscaling turns the pattern into mush.
+# wad_name/texture_name

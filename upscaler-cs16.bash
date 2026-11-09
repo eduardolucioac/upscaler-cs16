@@ -229,7 +229,7 @@ function f_manage_logs(){
         *)
             local error_now="Invalid option! (f_manage_logs)"
             f_manage_logs "$error_now" "e"
-            ez_i.error_exit "$error_now"
+            ez_i.fail_exit "$error_now"
         ;;
     esac
 }
@@ -249,7 +249,7 @@ function f_fail(){
     local message=$1
     ez_i.progress "o"
     f_manage_logs "$message" "e"
-    ez_i.error_exit "$message"
+    ez_i.fail_exit "$message"
 }
 
 # < -----------------------------------------
@@ -538,6 +538,11 @@ function f_scan_assets(){
         valve_arg=" --valve \"$WORK_FOLDER_VALVE\""
     fi
 
+    local only_arg=""
+    if [ -n "$MAPS_ONLY" ]; then
+        only_arg=" --only \"$MAPS_ONLY\""
+    fi
+
     f_run "python3 \"$ASSETS_TOOL\" scan \
 --maps \"$WORK_FOLDER_MAPS\" \
 --cstrike \"$WORK_FOLDER_CSTRIKE\"$valve_arg \
@@ -545,7 +550,7 @@ function f_scan_assets(){
 --target-px $TARGET_MAX_PX \
 --factors \"$UPSCALE_FACTORS\" \
 --hash-length $HASH_LENGTH\
-$try_max_px_arg$keep_engine_arg$wad_last_arg$black_list_arg \
+$try_max_px_arg$keep_engine_arg$wad_last_arg$only_arg$black_list_arg \
 > \"$SCAN_FILE\"" "An error occurred while scanning the maps!"
 
     ez_i.progress "o"
@@ -1108,9 +1113,9 @@ function f_export_images(){
 
     mkdir -p "$SOURCE_DIR"
 
-    # NOTE: How many are still to be written, so the progress line counts
-    # towards the right number: anything already in the final folders is
-    # skipped by "--done" and never reaches "$SOURCE_DIR".
+    # How many are still to be written, so the progress line counts towards
+    # the right number: anything already in the final folders is skipped by
+    # "--done" and never reaches "$SOURCE_DIR".
     local total_images=0 total_sky=0 already=0 pending=0
     f_model "totals" "images"; total_images=$MODEL_VALUE
     f_model "totals" "sky";    total_sky=$MODEL_VALUE
@@ -1118,14 +1123,30 @@ function f_export_images(){
         2> /dev/null | wc -l)
     pending=$((total_images + total_sky - already))
 
+    # MAPS_ONLY MAKES EVERYTHING IN ITS REACH BE MADE AGAIN.
+    #
+    # The reason to narrow a run to one map is to see what a change did, and
+    # a change shows up in nothing if every image is skipped for being
+    # already on disk. So the "--done" folders are not passed, and what
+    # comes out OVERWRITES what is there.
+    #
+    # Overwritten rather than deleted first, on purpose. A hash can belong
+    # to several maps, so deleting it would leave the other maps pointing at
+    # a file that is not there until they are run again. Writing over it
+    # keeps the name and gives every map that shares it the new version.
+    local done_args=" --done \"$FINAL_DETAIL_DIR\" --done \"$FINAL_ENV_DIR\""
+    if [ -n "$MAPS_ONLY" ]; then
+        done_args=""
+        pending=$((total_images + total_sky))
+    fi
+
     if [ ${pending} -le 0 ]; then
         ez_i.progress "a" " > Exporting images..."
     fi
     f_run_watched "python3 \"$ASSETS_TOOL\" export \
 --plan \"$SCAN_FILE\" \
---out \"$SOURCE_DIR\" \
---done \"$FINAL_DETAIL_DIR\" \
---done \"$FINAL_ENV_DIR\"" "An error occurred while exporting the images!" 1 \
+--out \"$SOURCE_DIR\"$done_args" \
+        "An error occurred while exporting the images!" 1 \
         "$SOURCE_DIR" "$pending" "Exporting" "$WORK_DIR"
     if [ ${pending} -le 0 ]; then
         ez_i.progress "o"
@@ -1451,7 +1472,11 @@ function f_write_extra_txt(){
         # file says nothing about the settings it was made under, so a
         # changed "black_list.txt" or HASH_LENGTH does not show up here by
         # itself. REDO_ALL is what applies it, and it deletes these too.
-        if ez_i.exists "" "f" "$output_file"; then
+        #
+        # With MAPS_ONLY set it is written again regardless, for the same
+        # reason the images are: a run narrowed to one map is a run meant to
+        # show what a change did.
+        if [ -z "$MAPS_ONLY" ] && ez_i.exists "" "f" "$output_file"; then
             ez_i.task_stats_skip task_stats extra_task
             task_stats_suffix=" / $task_stats"
             f_manage_logs " > Extra (\"*_extra.txt\") skipped; \
@@ -1475,7 +1500,24 @@ $task_stats" "o" 0
                 sky_separator=",
 "
             done
-            body+="	{\"base\" : \"sky\", \"replace\" :
+            # NOTE: The "skyname" is carried along as a key of its own.
+            #
+            # Every texture entry names what it replaces in its "base", so
+            # the file reads for itself - except this one, where "base" is
+            # the literal "sky" and the six sides are hashes. Version 1 did
+            # not have the problem: its files were called "fogrt.png" and so
+            # on, and the hash naming took that away.
+            #
+            # IMPORTANT: Put beside "base" and "replace", NOT inside the
+            # object holding the six sides - a reader walking those keys
+            # expecting six of them would trip over a seventh. A reader of
+            # the outer object looks up the keys it wants by name and has no
+            # reason to look at this one. It is still an addition to a
+            # format this project does not own; if a renderer ever objects,
+            # this single line is the thing to remove.
+            f_model "maps" "$map_name" "skyname"
+            f_json_escape "$MODEL_VALUE"
+            body+="	{\"base\" : \"sky\", \"skyname\" : \"$JSON_ESCAPED\", \"replace\" :
 		{
 $sky_body
 		}

@@ -193,7 +193,9 @@ The ones worth knowing about:
 | `SHARPEN_IMGS` | `1` | `1~3`, or `-1` to turn it off |
 | `PNG_COMPRESS_LEVEL` | `3` | `oxipng` level, or `-1` to skip it |
 | `RSRGAN_ENABLE_TTA` | `0` | up to 15% more quality for up to 8x the time |
-| `STOP_WAD_SKYNAME_MISSING` | `1` | stop when a map needs something no WAD has |
+| `STOP_WAD_SKYNAME_MISSING` | `1` | ask when a map needs something no WAD has |
+| `MAPS_ONLY` | *(empty)* | try a change on one map; **what it reaches is made again** |
+| `REDO_ALL` | `0` | make everything again; the only way to apply a changed setting |
 | `HASH_LENGTH` | `16` | **changing it renames every output file** |
 
 ## Running it
@@ -237,6 +239,23 @@ finish           4m39s     <- resize, sharpen, oxipng; CPU bound
 The slow part is not the AI. On older hardware, or with
 `RSRGAN_ENABLE_TTA=1`, the same work runs for hours. Either way it is
 interruptible; see below.
+
+### Trying something on one map
+
+A whole collection is hours. One map is minutes, and it is enough to see
+whether a setting did what you hoped:
+
+```bash
+MAPS_ONLY="de_quarry"       # one
+MAPS_ONLY="de_*,cs_office"  # or a few
+```
+
+**What it reaches is made again**, even when it is already on disk — every
+other run skips finished work, and this one would then show you nothing. The
+images are overwritten rather than deleted first, so a hash shared with
+other maps keeps its name and those maps get the new version too.
+
+Empty it again before the real run.
 
 ### Resuming
 

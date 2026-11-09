@@ -21,10 +21,10 @@
 #     ez_i.start "My Installer" "1.0.0" "$ABOUT" "$WARNINGS" "$COMPANY"
 #     ez_i.terms "$LICENCE"
 #
-#     ez_i.exists "" "d" "$TARGET_DIRECTORY" || ez_i.error_exit "No target!"
+#     ez_i.exists "" "d" "$TARGET_DIRECTORY" || ez_i.fail_exit "No target!"
 #
 #     declare -A RESULT=()
-#     ez_i.run RESULT "tar -xzf package.tar.gz" || ez_i.error_exit "${RESULT[stderr]}"
+#     ez_i.run RESULT "tar -xzf package.tar.gz" || ez_i.fail_exit "${RESULT[stderr]}"
 #
 #     ez_i.end "Done! Thanks!" "$USEFUL_INFORMATION"
 #
@@ -53,7 +53,7 @@
 #     the way "test" and "grep -q" behave:
 #
 #         if ez_i.exists "" "f" "$MY_FILE" ; then ...
-#         ez_i.is_root "" || ez_i.error_exit "You need to be root!"
+#         ez_i.is_root "" || ez_i.fail_exit "You need to be root!"
 #
 #     Pass a NAME instead and the answer goes there as 1 for true, 0 for
 #     false, and the exit status then only reports whether the check could be
@@ -93,9 +93,13 @@
 #     ez_i.end <title> <useful_information>
 #     ez_i.terms <terms>
 #     ez_i.instructions [var_name]|"" <instructions>
-#     ez_i.warning <message> [ask_continue]
+#     ez_i.notify <success|warning|error> <message> [1|0|-1] [sound]
+#     ez_i.success <message> [1|0|-1] [sound]
+#     ez_i.warning <message> [1|0|-1] [sound]
+#     ez_i.error <message> [1|0|-1] [sound]
+#     ez_i.sound <success|warning|error>
 #     ez_i.okay_exit [cause]
-#     ez_i.error_exit [detail]
+#     ez_i.fail_exit [detail]
 #     ez_i.print_long [var_name]|"" <text>
 #     ez_i.indent <2|4|8>
 #     ez_i.divider

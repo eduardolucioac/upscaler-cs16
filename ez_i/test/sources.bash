@@ -59,6 +59,10 @@ t_group "names"
 # Everything this library defines is "ez_i.<something>", "ez_i._<something>"
 # or "_EZ_I_<SOMETHING>". The one exception is EZ_I_SKIP_ON, which a script
 # sets, so it cannot be library private.
+#
+# The list below is deliberately exact. A name added to it is a name this
+# library puts into somebody else's scope, and that is a decision worth
+# having to make on purpose rather than by quietly widening a test.
 t_equals "no function escapes the \"ez_i.\" namespace" "" \
     "$(bash -c "
         EZ_I_SKIP_ON=1

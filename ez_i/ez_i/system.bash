@@ -41,7 +41,7 @@ function ez_i.run() {
     EXAMPLE
         declare -A RESULT=()
         ez_i.run RESULT "tar -xzf \"$MY_PACKAGE\"" || {
-            ez_i.error_exit "Extraction failed: ${RESULT[stderr]}"
+            ez_i.fail_exit "Extraction failed: ${RESULT[stderr]}"
         }
     '
 
@@ -98,7 +98,7 @@ function ez_i.is_root() {
         See "ez_i._bool". With an empty target: 0 when root.
 
     EXAMPLE
-        ez_i.is_root "" || ez_i.error_exit "You need to be root!"
+        ez_i.is_root "" || ez_i.fail_exit "You need to be root!"
     '
 
     if [[ $EUID -eq 0 ]] ; then
@@ -523,7 +523,7 @@ function ez_i.about_distro() {
         declare -A DISTRO=()
         ez_i.about_distro DISTRO
         ez_i.package_installed "" "git" "${DISTRO[package_manager]}" \
-            || ez_i.error_exit "Install git first!"
+            || ez_i.fail_exit "Install git first!"
     '
 
     if [ -z "$1" ] ; then

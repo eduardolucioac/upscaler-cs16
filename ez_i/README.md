@@ -14,10 +14,10 @@ source "./ez_i/ez_i.bash"
 ez_i.start "" "My Installer" "1.0.0" "$ABOUT" "$WARNINGS" "$COMPANY"
 ez_i.terms "$LICENCE"
 
-ez_i.exists "" "d" "$TARGET" || ez_i.error_exit "No target folder!"
+ez_i.exists "" "d" "$TARGET" || ez_i.fail_exit "No target folder!"
 
 declare -A RESULT=()
-ez_i.run RESULT "tar -xzf package.tar.gz" || ez_i.error_exit "${RESULT[stderr]}"
+ez_i.run RESULT "tar -xzf package.tar.gz" || ez_i.fail_exit "${RESULT[stderr]}"
 
 ez_i.end "Done! Thanks!" "$USEFUL_INFORMATION"
 ```
@@ -156,7 +156,7 @@ HEREDOC
 ez_i.start "" "$TITLE" "$VERSION" "$ABOUT" "$WARNINGS" "$COMPANY"
 ez_i.terms "$(cat "$MY_DIRECTORY/LICENSE.txt")"
 ez_i.instructions "" "- TO CANCEL installation at any time use Ctrl+c!"
-ez_i.is_root "" || ez_i.error_exit "You need to be root!"
+ez_i.is_root "" || ez_i.fail_exit "You need to be root!"
 ```
 
 Each of those pages its text when it is taller than the terminal, and
@@ -176,7 +176,7 @@ echo "ARCH: .... ${DISTRO[arch]}"
 ez_i.close_section
 
 if [ -z "${DISTRO[package_manager]}" ] ; then
-    ez_i.error_exit "\"${DISTRO[name]}\" is not supported!"
+    ez_i.fail_exit "\"${DISTRO[name]}\" is not supported!"
 fi
 ```
 
@@ -215,7 +215,7 @@ $STATS" 0 "$MY_LOG" "" 1
         ez_i.progress "o"
         ez_i.log "" "Could not install \"$PACKAGE\"!
 ${RESULT[stderr]}" 1 "" "$MY_DIRECTORY/logs"
-        ez_i.error_exit "Could not install \"$PACKAGE\"! ${RESULT[stderr]}"
+        ez_i.fail_exit "Could not install \"$PACKAGE\"! ${RESULT[stderr]}"
     }
     ez_i.progress "o"
 
@@ -303,7 +303,7 @@ the way `test` and `grep -q` behave:
 ```bash
 if ez_i.exists "" "f" "$MY_FILE" ; then ... ; fi
 
-ez_i.is_root "" || ez_i.error_exit "You need to be root!"
+ez_i.is_root "" || ez_i.fail_exit "You need to be root!"
 ez_i.file_contains "" "$CONFIG" "needle" || exit 1
 ```
 
@@ -364,9 +364,11 @@ reason to **stderr**. Nothing reaches stdout unless you ask with `-`.
 | `ez_i.end <title> <useful_information>` | the closing screen |
 | `ez_i.terms <terms>` | the licence, and get it agreed to |
 | `ez_i.instructions <var>\|"" <instructions>` | an instructions screen |
-| `ez_i.warning <message> [ask_continue]` | a warning, and wait |
+| `ez_i.notify <kind> <message> [1\|0\|-1] [sound]` | a message in a box: ask, wait, or neither |
+| `ez_i.success` / `ez_i.warning` / `ez_i.error` | the same, kind already filled in |
+| `ez_i.sound <success\|warning\|error>` | a sound, and nothing else |
 | `ez_i.okay_exit [cause]` | say why and **exit 0** |
-| `ez_i.error_exit [detail]` | say what went wrong and **exit 1** |
+| `ez_i.fail_exit [detail]` | say what went wrong and **exit 1** |
 | `ez_i.print_long <var>\|"" <text>` | print, paging when taller than the terminal |
 | `ez_i.indent <2\|4\|8>` | indent what is piped through it |
 | `ez_i.divider` | a divider |
@@ -523,8 +525,10 @@ the answer is when it runs out. An empty one is not an answer — it cannot be
 told apart from a bare enter, and it shows up in the prompt as
 `("" in 30 seconds)`, which tells the reader nothing.
 
-A **warning** is still printed, because the point of a warning is to be seen.
-What it does not do is wait.
+A **message** is still printed - `ez_i.notify` and its three faces - because
+the point of one is to be seen, and a sound is still made where one was asked
+for: the run nobody is watching is the one most likely to be noticed by ear.
+What they do not do is wait.
 
 ---
 
