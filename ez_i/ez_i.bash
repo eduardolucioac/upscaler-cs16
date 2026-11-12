@@ -28,6 +28,25 @@
 #
 #     ez_i.end "Done! Thanks!" "$USEFUL_INFORMATION"
 #
+# THESE WORK IN YOUR FUNCTIONS TOO
+#
+# The four "ez_i.emit_*" above are what every function here uses to hand a
+# value back, and they are public because the same problem turns up in any
+# script that tries it.
+#
+#     my_split() {
+#         local -a parts=()
+#         IFS="$2" read -r -a parts <<< "$1"
+#         ez_i.emit_array "$3" parts
+#     }
+#
+#     declare -a parts=()
+#     my_split "a,b,c" "," parts      # a target named like the local, and it
+#                                     # still arrives
+#
+# The locals of a function are read the first time it emits, and remembered.
+# See "ez_i/bootstrap.bash", HANDING A VALUE BACK, for what that is for.
+#
 # HOW VALUES COME BACK
 #
 # Nothing is returned through a global. Where a function has something to
@@ -75,6 +94,12 @@
 #         ez_i.log "" "Started." "o"
 #
 # PUBLIC API
+#
+#     RETURNING A VALUE FROM YOUR OWN FUNCTIONS
+#     ez_i.emit_scalar <var_name>|- <value>
+#     ez_i.emit_array <array_name> <source_array_name>
+#     ez_i.emit_assoc <assoc_name> <source_assoc_name>
+#     ez_i.emit_bool <var_name>|"" <1|0>
 #
 #     RUNNING THINGS
 #     ez_i.run <assoc_name> <command>

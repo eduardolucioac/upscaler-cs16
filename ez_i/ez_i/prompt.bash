@@ -88,7 +88,7 @@ when it runs out." >&2
     if [ -n "$timeout" ] && [ -z "$answer" ] ; then
         answer=$on_timeout
     fi
-    ez_i._emit "$target" "$answer"
+    ez_i.emit_scalar "$target" "$answer"
 }
 
 function ez_i.ask() {
@@ -131,7 +131,7 @@ function ez_i.ask() {
         fi
 
     done
-    ez_i._emit "$target" "$answer"
+    ez_i.emit_scalar "$target" "$answer"
 }
 
 function ez_i.ask_option() {
@@ -170,7 +170,7 @@ function ez_i.ask_option() {
     # NOTE: Bound and copied FIRST, while no local of this function exists
     # yet to shadow the name the caller gave. See "ez_i/bootstrap.bash",
     # RECEIVING AN ARRAY. The two values this function RETURNS go out
-    # through "ez_i._emit" at the end, which is the other half of the same
+    # through "ez_i.emit_scalar" at the end, which is the other half of the same
     # story.
     local -n _ez_i_src_ref="$4"
     local -a options=("${_ez_i_src_ref[@]}")
@@ -224,9 +224,9 @@ $listing: "
     done
 
     if [ -n "$desc_target" ] ; then
-        ez_i._emit "$desc_target" "$description"
+        ez_i.emit_scalar "$desc_target" "$description"
     fi
-    ez_i._emit "$target" "$answer"
+    ez_i.emit_scalar "$target" "$answer"
 }
 
 function ez_i.ask_yes_no() {
@@ -243,7 +243,7 @@ function ez_i.ask_yes_no() {
              happen: when $3 is given, and when EZ_I_SKIP_ON is set.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 for yes.
+        See "ez_i.emit_bool". With an empty target: 0 for yes.
 
         1, having written nothing and printed the reason on stderr, when
         nobody can answer and $4 did not say what to do. See below.
@@ -300,7 +300,7 @@ to use when it runs out." >&2
 (EZ_I_SKIP_ON) and was given no answer to use." >&2
             return 1
         fi
-        ez_i._bool "$target" "$unanswered"
+        ez_i.emit_bool "$target" "$unanswered"
         return
     fi
 
@@ -323,12 +323,12 @@ to use when it runs out." >&2
         fi
 
         if [[ $answer =~ ^([sS]|[yY])$ ]] ; then
-            ez_i._bool "$target" 1
+            ez_i.emit_bool "$target" 1
             return
         fi
         if [[ $answer =~ ^([nN])$ ]] ; then
             echo "NO!"
-            ez_i._bool "$target" 0
+            ez_i.emit_bool "$target" 0
             return
         fi
 

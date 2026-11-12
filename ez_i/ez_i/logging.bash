@@ -116,7 +116,7 @@ function ez_i.log() {
     }
 
     if [ -n "$target" ] ; then
-        ez_i._emit "$target" "$file"
+        ez_i.emit_scalar "$target" "$file"
     fi
 }
 

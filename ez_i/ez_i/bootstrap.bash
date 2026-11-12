@@ -100,7 +100,7 @@ declare -A _EZ_I_LOCALS=()
 # meant. Doing the same to its own local does NOT work: the name stays
 # scoped, merely unset, and the write recreates it.
 #
-# So the write is delegated to "ez_i._emit" and its relatives, one frame
+# So the write is delegated to "ez_i.emit_scalar" and its relatives, one frame
 # down, and they unset the offending local before binding. They must unset
 # ONLY when the target really is a local of their caller - unsetting anything
 # else would destroy the caller variable outright, attributes and all, and an
@@ -148,13 +148,22 @@ function ez_i._scan_locals() {
     local function_name=""
     local local_name=""
     local pairs=0
+    local wanted=""
+
+    # NOTE: One named function, or every "ez_i." one when nothing is named.
+    # The same awk serves both, which is why it is not written twice.
+    # By Questor
+    local wanted="$1"
+    if [ -z "$wanted" ] ; then
+        wanted=$(compgen -A function "ez_i.")
+    fi
 
     while IFS=$'\t' read -r function_name local_name ; do
         _EZ_I_LOCALS["$function_name"]+="$local_name "
         pairs=$((pairs + 1))
     done < <(
-        # shellcheck disable=SC2046
-        declare -f $(compgen -A function "ez_i.") 2> /dev/null | awk '
+        # shellcheck disable=SC2086
+        declare -f $wanted 2> /dev/null | awk '
             # Only names are wanted, never values, so the value of an
             # assignment is skipped whole - honouring quotes and
             # parentheses, because "local -A m=([k]=\"v 1\")" must yield "m"
@@ -230,12 +239,30 @@ function ez_i._unshadow() {
         0 always.
 
     SIDE EFFECTS
-        May unset one local of a function further up the stack.
+        May unset one local of a function further up the stack, and may add
+        that function to "_EZ_I_LOCALS".
 
     IMPORTANT: The target is unset ONLY when it is one of that function
     locals. Unsetting anything else would destroy the caller variable,
     attributes and all.
     '
+
+    # NOTE: A function this has never seen is read NOW and remembered.
+    #
+    # The sweep at load time covers this library. It cannot cover a caller
+    # that did not exist yet - anybody using "ez_i.emit_scalar" and its
+    # relatives in their OWN functions, which is what those are public for.
+    # Without this, their locals would be invisible here and their callers
+    # would go unprotected, silently.
+    #
+    # Measured at about 1.4 ms, paid once per function and then cached. The
+    # one thing it does not survive is a function REDEFINED after its first
+    # emit: the entry would then describe the old body. Accepted - redefining
+    # a function mid run is not something this library sets out to support.
+    # By Questor
+    if [ -z "${_EZ_I_LOCALS[$2]+x}" ] ; then
+        ez_i._scan_locals "$2"
+    fi
 
     case "${_EZ_I_LOCALS[$2]}" in
         *" $1 "*) unset "$1" ;;
@@ -243,7 +270,7 @@ function ez_i._unshadow() {
     return 0
 }
 
-function ez_i._emit() {
+function ez_i.emit_scalar() {
     : 'Hand a value back the way the caller asked for it.
 
     ARGUMENTS
@@ -271,7 +298,7 @@ function ez_i._emit() {
     _ez_i_rtn_ref="$2"
 }
 
-function ez_i._bool() {
+function ez_i.emit_bool() {
     : 'Hand a true or false answer back the way the caller asked for it.
 
     ARGUMENTS
@@ -302,7 +329,7 @@ function ez_i._bool() {
     return 0
 }
 
-function ez_i._emit_array() {
+function ez_i.emit_array() {
     : 'Hand an INDEXED array back to the caller.
 
     ARGUMENTS
@@ -332,7 +359,7 @@ function ez_i._emit_array() {
     _ez_i_dst_ref=("${_ez_i_copy[@]}")
 }
 
-function ez_i._emit_assoc() {
+function ez_i.emit_assoc() {
     : 'Hand an ASSOCIATIVE array back to the caller.
 
     ARGUMENTS
@@ -343,7 +370,7 @@ function ez_i._emit_assoc() {
     RETURNS
         0 on success, 1 when either name is empty.
 
-    IMPORTANT: As with "ez_i._emit_array", the contents are copied first.
+    IMPORTANT: As with "ez_i.emit_array", the contents are copied first.
 
     NOTE: The copy is key by key, so a large associative array costs.
     Nothing in this library returns one of more than a handful of keys.

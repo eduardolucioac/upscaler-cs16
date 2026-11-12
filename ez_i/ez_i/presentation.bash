@@ -57,7 +57,7 @@ function ez_i.start() {
         clear
     fi
     if [ -n "$target" ] ; then
-        ez_i._bool "$target" "$paged"
+        ez_i.emit_bool "$target" "$paged"
     fi
     return 0
 }
@@ -157,7 +157,7 @@ function ez_i.instructions() {
         clear
     fi
     if [ -n "$target" ] ; then
-        ez_i._bool "$target" "$paged"
+        ez_i.emit_bool "$target" "$paged"
     fi
     return 0
 }

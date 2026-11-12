@@ -164,13 +164,13 @@ function ez_i.print_long() {
     local text=$2
 
     if ((EZ_I_SKIP_ON == 1)) ; then
-        ez_i._bool "$target" 0 > /dev/null 2>&1
+        ez_i.emit_bool "$target" 0 > /dev/null 2>&1
         return 0
     fi
 
     if ((_EZ_I_HAS_TERMINAL == 0)) ; then
         echo "$text"
-        [ -n "$target" ] && ez_i._bool "$target" 0
+        [ -n "$target" ] && ez_i.emit_bool "$target" 0
         return 0
     fi
 
@@ -180,7 +180,7 @@ function ez_i.print_long() {
     if [ -z "$rows" ] || [ -z "$columns" ] \
         || [ "$rows" -lt 2 ] ; then
         echo "$text"
-        [ -n "$target" ] && ez_i._bool "$target" 0
+        [ -n "$target" ] && ez_i.emit_bool "$target" 0
         return 0
     fi
 
@@ -197,12 +197,12 @@ function ez_i.print_long() {
         # "less" gives the terminal back.
         echo "$_EZ_I_PAGER_KEYS$text"
 
-        [ -n "$target" ] && ez_i._bool "$target" 1
+        [ -n "$target" ] && ez_i.emit_bool "$target" 1
         return 0
     fi
 
     echo "$text"
-    [ -n "$target" ] && ez_i._bool "$target" 0
+    [ -n "$target" ] && ez_i.emit_bool "$target" 0
     return 0
 }
 

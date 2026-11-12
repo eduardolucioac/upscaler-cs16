@@ -54,6 +54,56 @@ t_equals "no test variable is declared with two different types" "" \
     "$(grep -hoE '^declare -[aA] (T_[A-Za-z_]+)' "$TESTS_DIRECTORY"/*.bash \
         | sort -u | awk '{print $3}' | sort | uniq -d)"
 
+t_group "emitting from a function of your own"
+
+# NOTE: The point of making the emitters public: a function OUTSIDE this
+# library, defined after it loaded, gets the same protection. Its locals
+# cannot have been swept at load time, so they are read on the first emit
+# and remembered.
+T_OUT="$(bash -c "
+    source \"$TESTS_ROOT/ez_i.bash\"
+    function app_sums() {
+        local value=0
+        local total=0
+        ez_i.emit_scalar \"\$1\" 42
+    }
+    declare value=UNTOUCHED
+    app_sums value
+    echo \"\$value\"
+" 2>&1)"
+t_equals "a caller local is written from an outside function" "42" "$T_OUT"
+
+T_OUT="$(bash -c "
+    source \"$TESTS_ROOT/ez_i.bash\"
+    function app_parts() {
+        local -a parts=(a b c)
+        ez_i.emit_array \"\$1\" parts
+    }
+    declare -a parts=()
+    app_parts parts
+    echo \"\${parts[*]}\"
+" 2>&1)"
+t_equals "and so is a caller array" "a b c" "$T_OUT"
+
+T_OUT="$(bash -c "
+    source \"$TESTS_ROOT/ez_i.bash\"
+    function app_flag() { local answer=9 ; ez_i.emit_bool \"\$1\" 1 ; }
+    declare answer=UNTOUCHED
+    app_flag answer
+    echo \"\$answer\"
+" 2>&1)"
+t_equals "and a caller bool" "1" "$T_OUT"
+
+# The entry is remembered, so the reading happens once and not per call.
+T_OUT="$(bash -c "
+    source \"$TESTS_ROOT/ez_i.bash\"
+    function app_once() { local value=0 ; ez_i.emit_scalar \"\$1\" 1 ; }
+    declare got=\"\"
+    app_once got
+    echo \"\${_EZ_I_LOCALS[app_once]}\"
+" 2>&1)"
+t_equals "the function is remembered after its first emit" " value " "$T_OUT"
+
 t_group "names"
 
 # Everything this library defines is "ez_i.<something>", "ez_i._<something>"

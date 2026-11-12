@@ -49,7 +49,7 @@ function ez_i.trim() {
             return 1
         ;;
     esac
-    ez_i._emit "$target" "$value"
+    ez_i.emit_scalar "$target" "$value"
 }
 
 function ez_i.reverse() {
@@ -73,7 +73,7 @@ function ez_i.reverse() {
     local target=$1
     local value=""
     value=$(echo "$2" | tac | rev)
-    ez_i._emit "$target" "$value"
+    ez_i.emit_scalar "$target" "$value"
 }
 
 # [Ref(s).: https://stackoverflow.com/a/73263419/3223785 ,
@@ -122,7 +122,7 @@ function ez_i.split() {
     do
         remaining="${remaining:${#delimiter}}"
     done
-    ez_i._emit_array "$1" parts
+    ez_i.emit_array "$1" parts
 }
 
 # <<<<<< STRINGS
@@ -164,7 +164,7 @@ function ez_i.sed_escape() {
             | sed "s/'/\\\x27/g" \
             | sed ':a;N;$!ba;s/\n/\\n/g')
     fi
-    ez_i._emit "$target" "$value"
+    ez_i.emit_scalar "$target" "$value"
 }
 
 function ez_i._sed_program() {
@@ -200,7 +200,7 @@ function ez_i._sed_program() {
     else
         program="'s/$pattern/$replacement/g'"
     fi
-    ez_i._emit "$target" "$program"
+    ez_i.emit_scalar "$target" "$program"
 }
 
 # [Ref(s).: https://stackoverflow.com/a/24134488/3223785 ,
@@ -262,7 +262,7 @@ function ez_i.sed_str() {
     if [ "$reversed" -eq 1 ] ; then
         ez_i.reverse result "$result"
     fi
-    ez_i._emit "$target" "$result"
+    ez_i.emit_scalar "$target" "$result"
 }
 
 function ez_i.sed_file() {

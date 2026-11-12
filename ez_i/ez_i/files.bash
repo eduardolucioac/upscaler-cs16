@@ -22,7 +22,7 @@ function ez_i.exists() {
         $3 - string, required. The path. A relative one works.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when it is there.
+        See "ez_i.emit_bool". With an empty target: 0 when it is there.
         2 on an unknown type, which is neither answer.
 
     A path that exists but is of the other kind answers false, not true: a
@@ -38,17 +38,17 @@ function ez_i.exists() {
 
     case "$2" in
         "f")
-            [ -f "$3" ] && { ez_i._bool "$1" 1; return; }
+            [ -f "$3" ] && { ez_i.emit_bool "$1" 1; return; }
         ;;
         "d")
-            [ -d "$3" ] && { ez_i._bool "$1" 1; return; }
+            [ -d "$3" ] && { ez_i.emit_bool "$1" 1; return; }
         ;;
         *)
             echo "ERROR! \"$2\" is not a check type. Use \"f\" or \"d\"." >&2
             return 2
         ;;
     esac
-    ez_i._bool "$1" 0
+    ez_i.emit_bool "$1" 0
 }
 
 function ez_i.file_contains() {
@@ -63,7 +63,7 @@ function ez_i.file_contains() {
         $4 - integer, optional. 1 - invert the check; 0 - do not. Default 0.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when it does contain it.
+        See "ez_i.emit_bool". With an empty target: 0 when it does contain it.
 
     The string is matched literally, so a dot, a bracket or an asterisk in it
     is just that character and nothing has to be escaped first.
@@ -86,7 +86,7 @@ function ez_i.file_contains() {
     if [ "$invert" -eq 1 ] ; then
         found=$((1 - found))
     fi
-    ez_i._bool "$1" "$found"
+    ez_i.emit_bool "$1" "$found"
 }
 
 # [Ref(s).: https://stackoverflow.com/a/23122112/3223785 ]
@@ -102,7 +102,7 @@ function ez_i.delete_if_empty() {
              hidden files as empty; 0 - do not. Default 0.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when it was deleted.
+        See "ez_i.emit_bool". With an empty target: 0 when it was deleted.
 
     SIDE EFFECTS
         Removes the folder when it is empty. A folder that is not empty, or
@@ -116,7 +116,7 @@ function ez_i.delete_if_empty() {
     fi
 
     if [ ! -d "$folder" ] ; then
-        ez_i._bool "$1" 0
+        ez_i.emit_bool "$1" 0
         return
     fi
 
@@ -125,15 +125,15 @@ function ez_i.delete_if_empty() {
         # NOTE: "rmdir" refuses a folder that is not empty, which is exactly
         # the test, and makes the check and the removal one atomic step.
         if rmdir "$folder" 2> /dev/null ; then
-            ez_i._bool "$1" 1
+            ez_i.emit_bool "$1" 1
             return
         fi
     elif [ -z "$(find "$folder" -mindepth 1 -not -path '*/.*')" ] ; then
         rm -rf "${folder:?}"
-        ez_i._bool "$1" 1
+        ez_i.emit_bool "$1" 1
         return
     fi
-    ez_i._bool "$1" 0
+    ez_i.emit_bool "$1" 0
 }
 
 # <<<<<< CHECKING
@@ -197,7 +197,7 @@ function ez_i.file_to_array() {
     local -a lines=()
     # [Ref(s).: https://stackoverflow.com/a/11395181/3223785 ]
     readarray -t lines < "$2"
-    ez_i._emit_array "$1" lines
+    ez_i.emit_array "$1" lines
 }
 
 # <<<<<< ARRAYS ON DISK
@@ -268,7 +268,7 @@ function ez_i.backup() {
         [path]="$(dirname "$new")"
         [full]="$new"
     )
-    ez_i._emit_assoc "$target" went_to
+    ez_i.emit_assoc "$target" went_to
 }
 
 # <<<<<< BACKUPS

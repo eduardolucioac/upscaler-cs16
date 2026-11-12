@@ -314,7 +314,7 @@ function ez_i.task_stats_init() {
         [total_items]=$((length / increment))
         [skipped]=0
     )
-    ez_i._emit_assoc "$1" counters
+    ez_i.emit_assoc "$1" counters
 }
 
 function ez_i.task_stats_begin() {
@@ -333,7 +333,7 @@ function ez_i.task_stats_begin() {
         return 1
     fi
     # NOTE: Read, changed and written back rather than mutated through a
-    # nameref, so that "ez_i._emit_assoc" can take the target off the scope
+    # nameref, so that "ez_i.emit_assoc" can take the target off the scope
     # chain first. A counter array named after one of the locals below would
     # otherwise never be updated. See "ez_i/bootstrap.bash".
     # NOTE: An ASSOCIATIVE array has to be copied key by key, so the
@@ -351,7 +351,7 @@ function ez_i.task_stats_begin() {
     unset -n _ez_i_src_ref
 
     _ez_i_counters[started_at]=$(($(date +%s%N) / 1000000))
-    ez_i._emit_assoc "$1" _ez_i_counters
+    ez_i.emit_assoc "$1" _ez_i_counters
 }
 
 function ez_i._task_stats_close() {
@@ -396,8 +396,8 @@ function ez_i._task_stats_close() {
     # NOTE: A task set up with a length of zero has nothing to report, and
     # dividing by it would print a BASH error into the caller's output.
     if ((_ez_i_counters[total_items] <= 0)) ; then
-        ez_i._emit_assoc "$2" _ez_i_counters
-        ez_i._emit "$target" "ITEMS LEFT 0/0 (100% SO FAR) / TIME LEFT 0ms"
+        ez_i.emit_assoc "$2" _ez_i_counters
+        ez_i.emit_scalar "$target" "ITEMS LEFT 0/0 (100% SO FAR) / TIME LEFT 0ms"
         return 0
     fi
 
@@ -424,8 +424,8 @@ function ez_i._task_stats_close() {
         ((_ez_i_counters[skipped]++))
     fi
 
-    ez_i._emit_assoc "$2" _ez_i_counters
-    ez_i._emit "$target" \
+    ez_i.emit_assoc "$2" _ez_i_counters
+    ez_i.emit_scalar "$target" \
 "ITEMS LEFT $left/${_ez_i_counters[total_items]} ($percent% SO FAR) / TIME LEFT $time_left"
 }
 

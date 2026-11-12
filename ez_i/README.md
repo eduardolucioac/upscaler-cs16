@@ -575,7 +575,7 @@ plain `local value` would therefore swallow the result of
 Rather than disfigure every local name to dodge it, the library removes the
 offending local from the chain before writing. A function CAN unset a local
 of the function that called *it*, so the write is delegated one frame down,
-to `ez_i._emit` and its relatives, and they unset the shadowing local before
+to `ez_i.emit_scalar` and its relatives, and they unset the shadowing local before
 binding the nameref.
 
 They unset **only** when the target really is a local of their caller.

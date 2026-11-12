@@ -165,12 +165,12 @@ done
 
 t_group "the copy is faithful"
 
-# "ez_i._emit_array" and "ez_i._emit_assoc" copy before they unset. The copy
+# "ez_i.emit_array" and "ez_i.emit_assoc" copy before they unset. The copy
 # has to survive everything a value can hold.
 function ez_i._t_awkward_array() {
     local -a parts=("com espaco" "" "com
 quebra" "com'aspas" 'com"aspas' "com\\barra")
-    ez_i._emit_array "$1" parts
+    ez_i.emit_array "$1" parts
 }
 ez_i._scan_locals
 declare -a T_GOT=()
@@ -196,7 +196,7 @@ function ez_i._t_awkward_assoc() {
     result["vazio"]=""
     result["quebra"]="com
 quebra"
-    ez_i._emit_assoc "$1" result
+    ez_i.emit_assoc "$1" result
 }
 ez_i._scan_locals
 declare -A T_GOT_A=()

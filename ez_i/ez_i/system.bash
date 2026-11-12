@@ -79,7 +79,7 @@ function ez_i.run() {
         [both]="$both"
         [status]="$t_ret"
     )
-    ez_i._emit_assoc "$1" result || return 1
+    ez_i.emit_assoc "$1" result || return 1
     return "$t_ret"
 }
 
@@ -95,17 +95,17 @@ function ez_i.is_root() {
              0 for not, or "" to answer through the exit status.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when root.
+        See "ez_i.emit_bool". With an empty target: 0 when root.
 
     EXAMPLE
         ez_i.is_root "" || ez_i.fail_exit "You need to be root!"
     '
 
     if [[ $EUID -eq 0 ]] ; then
-        ez_i._bool "$1" 1
+        ez_i.emit_bool "$1" 1
         return
     fi
-    ez_i._bool "$1" 0
+    ez_i.emit_bool "$1" 0
 }
 
 function ez_i.is_running() {
@@ -119,7 +119,7 @@ function ez_i.is_running() {
              process listing.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when it is running.
+        See "ez_i.emit_bool". With an empty target: 0 when it is running.
 
     NOTE: The question is the POSITIVE one. A double negative in a
     condition is a good way to get it backwards.
@@ -128,10 +128,10 @@ function ez_i.is_running() {
     # NOTE: The "grep -v grep" keeps the search from matching its own "grep"
     # process in the listing.
     if ps aux | grep -v "grep" | grep -q -- "$2" ; then
-        ez_i._bool "$1" 1
+        ez_i.emit_bool "$1" 1
         return
     fi
-    ez_i._bool "$1" 0
+    ez_i.emit_bool "$1" 0
 }
 
 function ez_i.package_installed() {
@@ -147,7 +147,7 @@ function ez_i.package_installed() {
              "ez_i.about_distro" reports as [package_manager].
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when it is installed.
+        See "ez_i.emit_bool". With an empty target: 0 when it is installed.
         2 on an unsupported package manager, which is neither answer.
     '
 
@@ -191,7 +191,7 @@ function ez_i.package_installed() {
             return 2
         ;;
     esac
-    ez_i._bool "$1" "$installed"
+    ez_i.emit_bool "$1" "$installed"
 }
 
 function ez_i.iptables_rule() {
@@ -208,7 +208,7 @@ function ez_i.iptables_rule() {
         $6 - integer, optional. Position in the chain. Default any.
 
     RETURNS
-        See "ez_i._bool". With an empty target: 0 when the rule is there.
+        See "ez_i.emit_bool". With an empty target: 0 when the rule is there.
 
     IMPORTANT: 1, or an exit status of 0, means the rule IS there.
 
@@ -241,10 +241,10 @@ function ez_i.iptables_rule() {
         | grep -- "$state" \
         | grep -- "$protocol" \
         | grep -q -- "dpt:$port " ; then
-        ez_i._bool "$1" 1
+        ez_i.emit_bool "$1" 1
         return
     fi
-    ez_i._bool "$1" 0
+    ez_i.emit_bool "$1" 0
 }
 
 function ez_i.total_memory() {
@@ -266,7 +266,7 @@ function ez_i.total_memory() {
     fi
     local total=""
     total=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo)
-    ez_i._emit "$target" "$total"
+    ez_i.emit_scalar "$target" "$total"
 }
 
 function ez_i.cpu_count() {
@@ -293,7 +293,7 @@ function ez_i.cpu_count() {
         echo "ERROR! Unable to determine the number of processors (\"nproc\")." >&2
         return 1
     fi
-    ez_i._emit "$target" "$((count * factor))"
+    ez_i.emit_scalar "$target" "$((count * factor))"
 }
 
 # <<<<<< THE MACHINE
@@ -341,14 +341,14 @@ function ez_i._release_key() {
         if [ "$unquote" -eq 1 ] ; then
             ez_i.split quoted "${parts[1]}" "\""
             if [ ${#quoted[@]} -gt 1 ] ; then
-                ez_i._emit "$target" "${quoted[1]}"
+                ez_i.emit_scalar "$target" "${quoted[1]}"
                 return
             fi
         fi
-        ez_i._emit "$target" "${parts[1]}"
+        ez_i.emit_scalar "$target" "${parts[1]}"
         return
     done
-    ez_i._emit "$target" ""
+    ez_i.emit_scalar "$target" ""
 }
 
 function ez_i._classify_release() {
@@ -491,7 +491,7 @@ function ez_i._classify_release() {
         [package_manager]="$manager"
         [arch]="$(uname -m)"
     )
-    ez_i._emit_assoc "$1" about
+    ez_i.emit_assoc "$1" about
 }
 
 function ez_i.about_distro() {
@@ -619,7 +619,7 @@ function ez_i.check_distro_status() {
             output="${result[stdout]}"
 
             if [[ $output == *"RHN Classic or Red Hat Satellite"* ]] ; then
-                ez_i._emit "$target" "$output"
+                ez_i.emit_scalar "$target" "$output"
                 ez_i.warning "THE REDHAT IS APPARENTLY USING \"RHN Classic\" OR \"Red Hat Satellite\" TO ACCESS ITS RESOURCES!
 THIS LIBRARY WILL NOT VALIDATE THESE RESOURCES!
 
@@ -635,10 +635,10 @@ FOR MORE INFORMATION TRY: \"yum repolist\"." 1
         output="${result[stdout]}"
         ez_i.split entries "$output" $'\n'
     else
-        ez_i._emit "$target" ""
+        ez_i.emit_scalar "$target" ""
         return 0
     fi
-    ez_i._emit "$target" "$output"
+    ez_i.emit_scalar "$target" "$output"
 
     for ((i = 0; i < ${#entries[@]}; i++)) ; do
         if [ "$distro" == "RedHat" ] ; then

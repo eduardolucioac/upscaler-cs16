@@ -54,7 +54,7 @@ function ez_i.format_time() {
     # otherwise come out as "1h " and "1d ".
     result="${result% }"
 
-    ez_i._emit "$target" "$result"
+    ez_i.emit_scalar "$target" "$result"
 }
 
 function ez_i.percent_of() {
@@ -97,7 +97,7 @@ function ez_i.percent_of() {
             fi
         fi
     fi
-    ez_i._emit "$target" "$result"
+    ez_i.emit_scalar "$target" "$result"
 }
 
 function ez_i.convert_bytes() {
@@ -139,7 +139,7 @@ function ez_i.convert_bytes() {
     if [ "$(echo "$value" | awk '$0-int($0){print 0;next}{print 1}')" -eq 1 ] ; then
         value=${value%\.*}
     fi
-    ez_i._emit "$target" "$value"
+    ez_i.emit_scalar "$target" "$value"
 }
 
 function ez_i._unit_power() {
@@ -167,7 +167,7 @@ function ez_i._unit_power() {
             return 1
         ;;
     esac
-    ez_i._emit "$target" "$power"
+    ez_i.emit_scalar "$target" "$power"
 }
 
 function ez_i.uuid() {
@@ -201,7 +201,7 @@ function ez_i.uuid() {
     if [ -n "$no_dashes" ] && [ "$no_dashes" -eq 1 ] ; then
         uuid="${uuid//-/}"
     fi
-    ez_i._emit "$target" "$uuid"
+    ez_i.emit_scalar "$target" "$uuid"
 }
 
 # <<<<<< NUMBERS
