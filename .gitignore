@@ -14,6 +14,11 @@ logs/
 __pycache__/
 *.pyc
 
+# Game screenshots, which is what the engine writes. They are the SOURCE of
+# the before/after pictures - 12 MB each - and what belongs in the project
+# is the finished pair, not the raw frames.
+*.bmp
+
 # Backup copies, the way "ez_smb_sync" does it. "images/upscaler-cs16_BAK.png"
 # is the art before it was resized: 417 KB that no README points at, and
 # neither sibling project carries an equivalent.

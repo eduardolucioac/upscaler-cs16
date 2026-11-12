@@ -20,8 +20,17 @@ and are upscaled once however many maps share them.
 
 **Support free software and my work!** ❤️🐧
 
+## The difference
+
+`de_dust_cz`, the same corner. Look at the window: the grille goes from a
+smear to circles and diamonds you can count, and the mesh behind them comes
+back. The crates get their grain, and the stonework stops being a flat wash.
+
+![Before and after](./images/before_n_after.webp)
+
 ## Table of Contents
 
+- [The difference](#the-difference)
 - [Layout](#layout)
 - [Requirements](#requirements)
    * [1. The tools](#1-the-tools)
@@ -29,6 +38,7 @@ and are upscaled once however many maps share them.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running it](#running-it)
+   * [Trying something on one map](#trying-something-on-one-map)
    * [Resuming](#resuming)
 - [What it does to your game](#what-it-does-to-your-game)
 - [How the textures are found](#how-the-textures-are-found)
